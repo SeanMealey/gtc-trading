@@ -1,0 +1,285 @@
+DATA EXPLANATION
+================
+Gemini BTC Prediction Market Data
+Collected: 2026-03-03
+Source: Gemini Exchange Public API (api.gemini.com)
+
+
+OVERVIEW
+--------
+This dataset contains historical market data for Gemini's BTC prediction markets.
+These markets are binary options on the spot price of Bitcoin. Each contract
+resolves to $1.00 if Bitcoin's price is above a specified strike price at a
+specified expiry time, and $0.00 if it is not. During trading, contracts trade
+at prices between $0.01 and $0.99, which can be interpreted as the market's
+implied probability that Bitcoin will be above that strike at expiry.
+
+Example: A contract priced at 0.72 implies a 72% probability that BTC will
+be above its strike price at expiry.
+
+
+MARKET STRUCTURE
+----------------
+Each "event" represents a specific expiry moment (e.g., "BTC price on March 3
+at 7pm EST"). Within each event, Gemini lists a ladder of contracts at different
+strike prices spaced $250 apart (e.g., $68,000 / $68,250 / $68,500 / ...).
+There are typically 4 to 150 strikes per event (average ~30), covering a range
+from deep out-of-the-money to deep in-the-money.
+
+Events recur throughout the day and across days. The data spans:
+  Earliest contract expiry: 2025-12-31
+  Latest contract expiry:   2026-03-07
+
+Total unique expiry events:  380 (759 were fetched; 380 are BTC price events,
+                              the rest were duplicates across status filters)
+Total individual contracts:  11,250
+
+
+INSTRUMENT NAMING CONVENTION
+-----------------------------
+Format: GEMI-BTC{YYMMDDHHII}-HI{PRICE}
+
+  GEMI    = Gemini exchange prefix
+  BTC     = underlying asset
+  YY      = 2-digit year
+  MM      = 2-digit month
+  DD      = 2-digit day
+  HH      = 2-digit hour (UTC)
+  II      = 2-digit minute (UTC)
+  HI      = "higher than" (all contracts are of this type)
+  PRICE   = strike price in USD (no commas or decimals)
+
+Examples:
+  GEMI-BTC2603030000-HI69000  -> BTC > $69,000 at 2026-03-03 00:00 UTC
+  GEMI-BTC2603032200-HI68500  -> BTC > $68,500 at 2026-03-03 22:00 UTC
+
+
+FILES
+-----
+
+data/gemini_prediction_markets/
+  events.csv              Metadata for all 11,250 contracts
+  combined_candles.csv    5-minute OHLCV price data (1,489,454 rows, ~90 MB)
+  combined_trades.csv     Individual trade records (242,698 rows, ~16 MB)
+  candles/                Per-instrument candle CSVs (1,333 files)
+  trades/                 Per-instrument trade CSVs (1,693 files)
+
+
+FILE DETAILS
+------------
+
+events.csv  (11,250 rows + header)
+  One row per contract. Contains metadata snapshot at collection time.
+  ~9,500 contracts had no market activity (deep OTM/ITM, zero liquidity).
+
+  Columns:
+    event_ticker      Unique identifier for the event
+                      Format: BTC{YYMMDDHHII}
+                      Example: BTC2603030000
+
+    event_title       Human-readable event description
+                      Example: "BTC price today at 7pm EST"
+
+    event_status      Status of the parent event
+                      Values: active, settled, approved
+
+    event_created     ISO 8601 timestamp when the event was listed
+
+    event_resolved    ISO 8601 timestamp when the event resolved (null if active)
+
+    contract_id       Internal Gemini contract ID (format: {event_id}-{contract_id})
+
+    contract_label    Human-readable strike description
+                      Example: "BTC > $69,000"
+
+    instrument        Full instrument symbol used in all other files
+                      Example: GEMI-BTC2603030000-HI69000
+
+    contract_status   Status of this specific contract
+                      Values: active, settled, approved
+
+    expiry            ISO 8601 timestamp when this contract expires/expired
+
+    last_trade_price  Most recent trade price (0.01 to 0.99, or null)
+
+    best_bid          Highest resting buy order at collection time (or null)
+
+    best_ask          Lowest resting sell order at collection time (or null)
+
+    total_shares      Total contracts outstanding (usually 0 in API response)
+
+
+combined_candles.csv  (1,489,454 rows + header)
+  5-minute OHLCV bars for all instruments that had any trading activity.
+  Covers 1,333 unique instruments. Bars are sorted by instrument then time.
+  Date range: 2026-02-23 to 2026-03-02.
+
+  Columns:
+    instrument    Instrument symbol (matches events.csv)
+    timestamp_ms  Bar open time in Unix milliseconds (UTC)
+    open          Price at bar open  (0.01 – 0.99)
+    high          Highest price during bar
+    low           Lowest price during bar
+    close         Price at bar close
+    volume        Number of contracts traded during bar (can be 0 between trades)
+
+  Notes:
+    - Prices are on a 0-1 scale representing probability (not USD)
+    - Volume is in contracts, not USD
+    - A bar with volume=0 is a "filler" bar emitted between real trades
+    - Each instrument's candle history spans only its listing-to-expiry window
+      (typically a few hours to a few days)
+    - Candles per instrument range from 2 to 4,032 (median: 24, average: 1,117)
+
+
+combined_trades.csv  (242,698 rows + header)
+  Individual executed trades for all instruments that had activity.
+  Covers 1,693 unique instruments. Sorted by instrument then timestamp.
+  Date range: 2025-12-15 to 2026-03-02.
+
+  Columns:
+    instrument    Instrument symbol (matches events.csv)
+    timestamp_ms  Trade execution time in Unix milliseconds (UTC)
+    tid           Unique trade ID assigned by Gemini (integer)
+    price         Executed price (0.01 – 0.99)
+    amount        Number of contracts traded
+    type          Aggressor side: "buy" or "sell"
+
+  Notes:
+    - "buy" means a buyer was the aggressor (lifted an ask)
+    - "sell" means a seller was the aggressor (hit a bid)
+    - Buy/sell split: 232,688 buys vs 10,010 sells (~96% buy-aggressed)
+    - Amount range: 1 to 14,326 contracts per trade (average: 89)
+    - The 500-trade limit per instrument means very active instruments
+      may be truncated to only the most recent 500 trades
+
+
+LIQUIDITY DISTRIBUTION
+-----------------------
+Of the 11,250 contracts, only ~1,300-1,700 had any market activity.
+Liquid contracts are near-the-money: strikes within roughly $2,000-$3,000
+of spot Bitcoin at the time of listing. Deep OTM and deep ITM contracts
+are listed by Gemini but attract no trading interest.
+
+
+SPOT BTC/USD PRICE DATA
+-----------------------
+To price these digital options and detect mispricings, spot BTC/USD data is
+required. Two sources are provided, covering different periods and resolutions.
+
+Gemini's candle API returns only a fixed rolling window with no historical
+pagination, so coverage is limited for each timeframe. Binance.US supplements
+the gap between the earliest prediction market trades and the start of Gemini's
+fine-grained historical data.
+
+data/gemini_spot/  (primary spot feed — Gemini's own settlement price)
+
+  BTCUSD_1m.csv        1,440 rows | last ~24 hours     | 1-min bars
+  BTCUSD_5m.csv        2,016 rows | last ~7 days        | 5-min bars
+  BTCUSD_15m.csv       1,344 rows | last ~14 days       | 15-min bars
+  BTCUSD_30m.csv       1,440 rows | last ~40 days       | 30-min bars
+  BTCUSD_1hr.csv       1,416 rows | back to 2026-01-03  | 1-hr bars
+  BTCUSD_6hr.csv         360 rows | back to 2025-12-03  | 6-hr bars
+  BTCUSD_1day.csv        365 rows | back to 2025-03-03  | daily bars
+  BTCUSD_composite.csv 5,705 rows | full range          | finest available per timestamp
+
+  The composite file merges all timeframes, using the highest-resolution source
+  for each timestamp. A "source_tf_min" column indicates the resolution in
+  minutes (1 = 1m bar, 60 = 1hr bar, etc.).
+
+  Columns (all files): timestamp_ms, datetime_utc, open, high, low, close, volume
+  Prices are in USD. Volume is in BTC.
+
+  These prices are sourced from Gemini's own BTC/USD market — the same price
+  feed against which prediction market contracts settle.
+
+data/gemini_spot/BTCUSD_binance_supplement_1m.csv
+  (supplement — Binance.US BTCUSDT 1-minute bars)
+
+  48,961 rows | 2025-12-01 to 2026-01-04 | 1-min bars
+  Price range: $83,877 - $94,629
+
+  Covers the period where Gemini's 1hr data is unavailable (before 2026-01-03),
+  allowing fine-grained spot price lookup for the ~5 prediction market
+  instruments with trades in December 2025.
+
+  Note: Binance.US has ~59% zero-volume 1-minute bars due to thin US market
+  liquidity. Prices in zero-volume bars are the last traded price carried
+  forward — valid as a spot reference. The maximum observed gap between
+  actual trades is 48 minutes. BTCUSDT (Tether) prices are used as a USD
+  proxy; the USDT/USD spread is negligible for this purpose.
+
+SPOT DATA COVERAGE SUMMARY
+---------------------------
+  Period                   Source                  Resolution
+  2025-03-03 to present    Gemini BTCUSD_1day       daily
+  2025-12-01 to 2026-01-04 Binance BTCUSDT_1m       1-min (supplement)
+  2026-01-03 to present    Gemini BTCUSD_1hr         1-hr
+  2026-02-01 to present    Gemini BTCUSD_30m         30-min
+  2026-02-17 to present    Gemini BTCUSD_15m         15-min
+  2026-02-24 to present    Gemini BTCUSD_5m          5-min
+  2026-03-02 to present    Gemini BTCUSD_1m          1-min
+
+  For strategy work: use Gemini files where available (settlement accuracy),
+  fall back to Binance supplement for Dec 2025 trades only.
+
+
+DERIBIT BTC OPTIONS (IV SURFACE FOR CALIBRATION)
+-------------------------------------------------
+Source: Deribit public API (no authentication required)
+Collected: on-demand via src/data_collection/get_deribit_options.py
+Location: data/deribit/
+
+These are standard European BTC options (calls and puts) traded on Deribit.
+Unlike Gemini's binary options, Deribit options pay max(S(T) - K, 0) or
+max(K - S(T), 0) and are settled in BTC. Deribit is the dominant venue for
+BTC options by open interest and provides the most liquid, benchmark IV surface
+for BTC volatility.
+
+This data is used for implied calibration of the Bates SVJ model. Because
+Deribit options span many strikes and expiries simultaneously, their implied
+volatility surface constrains all Bates model parameters (v0, kappa, theta,
+sigma_v, rho, lambda, mu_j, sigma_j) in a single cross-sectional fit.
+
+data/deribit/btc_options_chain.csv          (latest snapshot)
+data/deribit/btc_options_chain_{stamp}.csv  (timestamped archive snapshots)
+
+  ~1,024 rows per snapshot (512 calls + 512 puts)
+  Expiries: daily for the nearest week, then weekly out ~1 month,
+            monthly out to Dec 2026 (12 expiries total as of 2026-03-05)
+  Most liquid expiry: the nearest Friday (monthly/quarterly expiries hold
+                      the bulk of open interest)
+
+  Columns:
+    instrument_name   Deribit symbol, e.g. BTC-27MAR26-80000-C
+    option_type       "call" or "put"
+    strike            Strike price in USD
+    expiry_ts_ms      Expiry timestamp (Unix ms, UTC)
+    expiry_dt         ISO 8601 expiry string, e.g. 2026-03-27T08:00:00Z
+    tte_years         Time to expiry in years at snapshot time
+    underlying_price  Deribit forward price for this expiry in USD (F(T))
+    mark_iv           Deribit implied volatility in % (annualised, Black-Scholes)
+                      This is the primary signal for Bates calibration.
+    mark_price_btc    Mark price in BTC (multiply by underlying_price for USD)
+    bid_price_btc     Best bid in BTC
+    ask_price_btc     Best ask in BTC
+    mid_price_btc     Mid price in BTC
+    open_interest     Open interest in contracts (1 contract = 1 BTC)
+    volume_usd_24h    24-hour volume in USD
+    snapshot_ts       UTC timestamp when this snapshot was taken
+
+  Liquidity filter for calibration: open_interest > 10 BTC
+  Moneyness filter:                  0.75 < K / F(T) < 1.35
+  Expiry filter:                     tte_years > 3/365 (at least 3 days)
+
+  Note: mark_price_btc prices are denominated in BTC. To convert to USD:
+    price_usd = mark_price_btc * underlying_price
+  The underlying_price is the forward price, which already incorporates the
+  cost of carry (BTC has no dividend, so F ≈ S * e^{rT}).
+
+CALIBRATION OUTPUT
+------------------
+  data/deribit/bates_params_implied.json
+    BatesParams JSON produced by src/calibration/implied.py.
+    Represents the risk-neutral (Q-measure) Bates model parameters that
+    best fit the Deribit IV surface at the time of the last calibration run.

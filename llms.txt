@@ -1,0 +1,176 @@
+# llms.txt for Gemini Exchange API Docs
+
+## Website Crawling and Indexing Guidelines for Language Models
+
+# Last Updated: 2026-02-25T22:41:12.825Z
+
+## Site Information:
+
+- site_name: Gemini Exchange API Docs
+- site_url: https://docs.gemini.com
+- site_description: /websocket/overview/introduction
+- REST API: Version 1.0.0
+- [OpenAPI REST Version 1.0.0 spec url](https://docs.gemini.com/rest.yaml)
+## Changelog:
+
+- [Changelog URL](https://docs.gemini.com/changelog/revision-history)
+
+## Website Structure:
+
+- Get Started: /
+- REST: /rest
+- Websocket: /websocket/overview/introduction
+- FIX: /fix/overview/dictionary/version
+- Changelog: /changelog/revision-history
+
+## Important Documentation Content:
+
+- REST version 1.0.0 API Reference: /rest
+## Allowed Crawling Paths
+
+- /*
+
+## API Documentation Links
+
+The following URLs links include REST, FIX and Websocket documentation:
+
+### [troubleshooting](https://docs.gemini.com/troubleshooting)
+### [roles](https://docs.gemini.com/roles)
+### [rate-limit](https://docs.gemini.com/rate-limit)
+### [gemini-clearing](https://docs.gemini.com/gemini-clearing)
+### [error-codes](https://docs.gemini.com/error-codes)
+### [data-types](https://docs.gemini.com/data-types)
+### [client-order-id](https://docs.gemini.com/client-order-id)
+### [account-admin-endpoints](https://docs.gemini.com/account-admin-endpoints)
+### [websocket streams](https://docs.gemini.com/websocket/streams)
+### [websocket message-format](https://docs.gemini.com/websocket/message-format)
+### [websocket introduction](https://docs.gemini.com/websocket/introduction)
+### [websocket authentication](https://docs.gemini.com/websocket/authentication)
+### [prediction-markets getting-started](https://docs.gemini.com/prediction-markets/getting-started)
+### [market-data symbols-and-minimums](https://docs.gemini.com/market-data/symbols-and-minimums)
+### [get-started sandbox](https://docs.gemini.com/get-started/sandbox)
+### [get-started intro](https://docs.gemini.com/get-started/intro)
+### [get-started gemini-staking](https://docs.gemini.com/get-started/gemini-staking)
+### [changelog upcoming-changes](https://docs.gemini.com/changelog/upcoming-changes)
+### [changelog revision-history](https://docs.gemini.com/changelog/revision-history)
+### [authentication oauth](https://docs.gemini.com/authentication/oauth)
+### [authentication api-key](https://docs.gemini.com/authentication/api-key)
+### [websocket archived v2](https://docs.gemini.com/websocket/archived/v2)
+### [websocket archived v1](https://docs.gemini.com/websocket/archived/v1)
+### [websocket archived order-events](https://docs.gemini.com/websocket/archived/order-events)
+### [websocket archived multi-market-data](https://docs.gemini.com/websocket/archived/multi-market-data)
+### [prediction-markets tickers sports](https://docs.gemini.com/prediction-markets/tickers/sports)
+### [prediction-markets tickers overview](https://docs.gemini.com/prediction-markets/tickers/overview)
+### [prediction-markets tickers crypto](https://docs.gemini.com/prediction-markets/tickers/crypto)
+### [fix overview standard-trailer](https://docs.gemini.com/fix/overview/standard-trailer)
+### [fix overview standard-header](https://docs.gemini.com/fix/overview/standard-header)
+### [fix overview precision-on-the-exchange](https://docs.gemini.com/fix/overview/precision-on-the-exchange)
+### [fix overview connecting](https://docs.gemini.com/fix/overview/connecting)
+### [fix overview allowed-characters](https://docs.gemini.com/fix/overview/allowed-characters)
+### [fix order-entry third-party-support](https://docs.gemini.com/fix/order-entry/third-party-support)
+### [fix order-entry introduction](https://docs.gemini.com/fix/order-entry/introduction)
+### [fix order-entry errors](https://docs.gemini.com/fix/order-entry/errors)
+### [fix market-data introduction](https://docs.gemini.com/fix/market-data/introduction)
+### [fix drop-copy introduction](https://docs.gemini.com/fix/drop-copy/introduction)
+### [fix overview session-level-messages when-can-sequence-numbers-reset](https://docs.gemini.com/fix/overview/session-level-messages/when-can-sequence-numbers-reset)
+### [fix overview session-level-messages test-request](https://docs.gemini.com/fix/overview/session-level-messages/test-request)
+### [fix overview session-level-messages sequence-reset](https://docs.gemini.com/fix/overview/session-level-messages/sequence-reset)
+### [fix overview session-level-messages resend-request](https://docs.gemini.com/fix/overview/session-level-messages/resend-request)
+### [fix overview session-level-messages reject](https://docs.gemini.com/fix/overview/session-level-messages/reject)
+### [fix overview session-level-messages logout](https://docs.gemini.com/fix/overview/session-level-messages/logout)
+### [fix overview session-level-messages logon](https://docs.gemini.com/fix/overview/session-level-messages/logon)
+### [fix overview session-level-messages heartbeat](https://docs.gemini.com/fix/overview/session-level-messages/heartbeat)
+### [fix overview session-level-messages establishing-a-connection](https://docs.gemini.com/fix/overview/session-level-messages/establishing-a-connection)
+### [fix overview session-level-messages ending-a-connection](https://docs.gemini.com/fix/overview/session-level-messages/ending-a-connection)
+### [fix overview session-level-messages business-message-reject](https://docs.gemini.com/fix/overview/session-level-messages/business-message-reject)
+### [fix overview dictionary version](https://docs.gemini.com/fix/overview/dictionary/version)
+### [fix overview dictionary download](https://docs.gemini.com/fix/overview/dictionary/download)
+### [fix overview dictionary custom-tags](https://docs.gemini.com/fix/overview/dictionary/custom-tags)
+### [fix order-entry workflow when-trades-occur](https://docs.gemini.com/fix/order-entry/workflow/when-trades-occur)
+### [fix order-entry workflow submitting-an-order](https://docs.gemini.com/fix/order-entry/workflow/submitting-an-order)
+### [fix order-entry workflow submitting-a-stop-limit-order](https://docs.gemini.com/fix/order-entry/workflow/submitting-a-stop-limit-order)
+### [fix order-entry workflow cancelling-an-order](https://docs.gemini.com/fix/order-entry/workflow/cancelling-an-order)
+### [fix order-entry price-&-quantity understanding-price-&-quantity](https://docs.gemini.com/fix/order-entry/price-&-quantity/understanding-price-&-quantity)
+### [fix order-entry price-&-quantity currency-denominated-fields](https://docs.gemini.com/fix/order-entry/price-&-quantity/currency-denominated-fields)
+### [fix order-entry identifiers identifiers-assigned-by-gemini](https://docs.gemini.com/fix/order-entry/identifiers/identifiers-assigned-by-gemini)
+### [fix order-entry identifiers client-supplied-identifiers](https://docs.gemini.com/fix/order-entry/identifiers/client-supplied-identifiers)
+### [fix order-entry gemini-clearing initiate-a-clearing-order](https://docs.gemini.com/fix/order-entry/gemini-clearing/initiate-a-clearing-order)
+### [fix order-entry gemini-clearing gemini-clearing-workflow](https://docs.gemini.com/fix/order-entry/gemini-clearing/gemini-clearing-workflow)
+### [fix order-entry gemini-clearing fix-broker-support](https://docs.gemini.com/fix/order-entry/gemini-clearing/fix-broker-support)
+### [fix order-entry gemini-clearing clearing-order-confirmation](https://docs.gemini.com/fix/order-entry/gemini-clearing/clearing-order-confirmation)
+### [fix order-entry gemini-clearing clearing-order-cancellation](https://docs.gemini.com/fix/order-entry/gemini-clearing/clearing-order-cancellation)
+### [fix order-entry exchange-bound-messages order-cancel-request](https://docs.gemini.com/fix/order-entry/exchange-bound-messages/order-cancel-request)
+### [fix order-entry exchange-bound-messages new-order-single-stop-limit](https://docs.gemini.com/fix/order-entry/exchange-bound-messages/new-order-single-stop-limit)
+### [fix order-entry exchange-bound-messages new-order-single-market](https://docs.gemini.com/fix/order-entry/exchange-bound-messages/new-order-single-market)
+### [fix order-entry exchange-bound-messages new-order-single-limit](https://docs.gemini.com/fix/order-entry/exchange-bound-messages/new-order-single-limit)
+### [fix order-entry examples server-side-cancellations](https://docs.gemini.com/fix/order-entry/examples/server-side-cancellations)
+### [fix order-entry examples order-cancel-request](https://docs.gemini.com/fix/order-entry/examples/order-cancel-request)
+### [fix order-entry examples new-order-single](https://docs.gemini.com/fix/order-entry/examples/new-order-single)
+### [fix order-entry examples new-order-single-on-behalf-of-third-party](https://docs.gemini.com/fix/order-entry/examples/new-order-single-on-behalf-of-third-party)
+### [fix order-entry examples new-market-sell-order](https://docs.gemini.com/fix/order-entry/examples/new-market-sell-order)
+### [fix order-entry examples new-market-buy-order](https://docs.gemini.com/fix/order-entry/examples/new-market-buy-order)
+### [fix order-entry examples market-order-partial-fill](https://docs.gemini.com/fix/order-entry/examples/market-order-partial-fill)
+### [fix order-entry examples market-order-fill](https://docs.gemini.com/fix/order-entry/examples/market-order-fill)
+### [fix order-entry examples execution-reports](https://docs.gemini.com/fix/order-entry/examples/execution-reports)
+### [fix order-entry client-bound-messages order-cancel-reject](https://docs.gemini.com/fix/order-entry/client-bound-messages/order-cancel-reject)
+### [fix order-entry client-bound-messages order-cancel-reasons](https://docs.gemini.com/fix/order-entry/client-bound-messages/order-cancel-reasons)
+### [fix order-entry client-bound-messages execution-report](https://docs.gemini.com/fix/order-entry/client-bound-messages/execution-report)
+### [fix market-data workflow understanding-price-and-quantity](https://docs.gemini.com/fix/market-data/workflow/understanding-price-and-quantity)
+### [fix market-data workflow symbol-list](https://docs.gemini.com/fix/market-data/workflow/symbol-list)
+### [fix market-data workflow market-data-subscription](https://docs.gemini.com/fix/market-data/workflow/market-data-subscription)
+### [fix market-data workflow currency-based-messages-and-fields](https://docs.gemini.com/fix/market-data/workflow/currency-based-messages-and-fields)
+### [fix market-data workflow about](https://docs.gemini.com/fix/market-data/workflow/about)
+### [fix market-data identifiers identifiers-assigned-by-gemini](https://docs.gemini.com/fix/market-data/identifiers/identifiers-assigned-by-gemini)
+### [fix market-data identifiers client-supplied-identifiers](https://docs.gemini.com/fix/market-data/identifiers/client-supplied-identifiers)
+### [fix market-data exchange-bound-messages symbol-list-request](https://docs.gemini.com/fix/market-data/exchange-bound-messages/symbol-list-request)
+### [fix market-data exchange-bound-messages market-data-request](https://docs.gemini.com/fix/market-data/exchange-bound-messages/market-data-request)
+### [fix market-data examples request-for-symbol-list](https://docs.gemini.com/fix/market-data/examples/request-for-symbol-list)
+### [fix market-data examples market-data-responses](https://docs.gemini.com/fix/market-data/examples/market-data-responses)
+### [fix market-data examples market-data-requests](https://docs.gemini.com/fix/market-data/examples/market-data-requests)
+### [fix market-data client-bound-messages symbol-list](https://docs.gemini.com/fix/market-data/client-bound-messages/symbol-list)
+### [fix market-data client-bound-messages market-data-snapshot-full-refresh](https://docs.gemini.com/fix/market-data/client-bound-messages/market-data-snapshot-full-refresh)
+### [fix market-data client-bound-messages market-data-request-reject](https://docs.gemini.com/fix/market-data/client-bound-messages/market-data-request-reject)
+### [fix market-data client-bound-messages market-data-incremental-refresh](https://docs.gemini.com/fix/market-data/client-bound-messages/market-data-incremental-refresh)
+### [fix drop-copy workflow understanding-price-and-quantity](https://docs.gemini.com/fix/drop-copy/workflow/understanding-price-and-quantity)
+### [fix drop-copy workflow currency-based-messages-and-fields](https://docs.gemini.com/fix/drop-copy/workflow/currency-based-messages-and-fields)
+### [fix drop-copy workflow about](https://docs.gemini.com/fix/drop-copy/workflow/about)
+### [fix drop-copy party-ids-&-roles third-party-support](https://docs.gemini.com/fix/drop-copy/party-ids-&-roles/third-party-support)
+### [fix drop-copy party-ids-&-roles fields](https://docs.gemini.com/fix/drop-copy/party-ids-&-roles/fields)
+### [fix drop-copy identifiers identifiers-assigned-by-gemini](https://docs.gemini.com/fix/drop-copy/identifiers/identifiers-assigned-by-gemini)
+### [fix drop-copy identifiers client-supplied-identifiers](https://docs.gemini.com/fix/drop-copy/identifiers/client-supplied-identifiers)
+### [fix drop-copy examples buy-limit-order](https://docs.gemini.com/fix/drop-copy/examples/buy-limit-order)
+### [fix drop-copy examples buy-limit-order-third-party](https://docs.gemini.com/fix/drop-copy/examples/buy-limit-order-third-party)
+### [fix drop-copy client-bound-messages trade-capture-report](https://docs.gemini.com/fix/drop-copy/client-bound-messages/trade-capture-report)
+### [rest](https://docs.gemini.com/rest)
+### [rest market-data](https://docs.gemini.com/rest/market-data)
+### [rest orders](https://docs.gemini.com/rest/orders)
+### [rest fund-management](https://docs.gemini.com/rest/fund-management)
+### [rest margin-trading](https://docs.gemini.com/rest/margin-trading)
+### [rest session](https://docs.gemini.com/rest/session)
+### [rest clearing](https://docs.gemini.com/rest/clearing)
+### [rest instant](https://docs.gemini.com/rest/instant)
+### [rest account-administration](https://docs.gemini.com/rest/account-administration)
+### [rest o-auth](https://docs.gemini.com/rest/o-auth)
+### [rest staking](https://docs.gemini.com/rest/staking)
+### [rest derivatives](https://docs.gemini.com/rest/derivatives)
+### [rest ~endpoints](https://docs.gemini.com/rest/~endpoints)
+### [rest ~schemas](https://docs.gemini.com/rest/~schemas)
+### [prediction-markets](https://docs.gemini.com/prediction-markets)
+### [prediction-markets markets](https://docs.gemini.com/prediction-markets/markets)
+### [prediction-markets trading](https://docs.gemini.com/prediction-markets/trading)
+### [prediction-markets positions](https://docs.gemini.com/prediction-markets/positions)
+### [prediction-markets ~endpoints](https://docs.gemini.com/prediction-markets/~endpoints)
+### [prediction-markets ~schemas](https://docs.gemini.com/prediction-markets/~schemas)
+### [rest-api](https://docs.gemini.com/rest-api)
+### [oauth](https://docs.gemini.com/oauth)
+### [fix-api](https://docs.gemini.com/fix-api)
+### [fix-marketdata](https://docs.gemini.com/fix-marketdata)
+### [fix-dropcopy](https://docs.gemini.com/fix-dropcopy)
+### [websocket fast-api](https://docs.gemini.com/websocket/fast-api)
+### [websocket fast-api introduction](https://docs.gemini.com/websocket/fast-api/introduction)
+### [websocket fast-api authentication](https://docs.gemini.com/websocket/fast-api/authentication)
+### [websocket fast-api message-format](https://docs.gemini.com/websocket/fast-api/message-format)
+### [websocket fast-api streams](https://docs.gemini.com/websocket/fast-api/streams)
+### [websocket fast-api playground](https://docs.gemini.com/websocket/fast-api/playground)
+### [Home](https://docs.gemini.com/)
+### [websocket playground](https://docs.gemini.com/websocket/playground)
