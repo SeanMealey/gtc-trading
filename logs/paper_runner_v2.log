@@ -1,0 +1,39 @@
+nohup: ignoring input
+Loaded params from /home/ubuntu/gtc-trading/data/deribit/bates_params_implied.json
+[2026-03-14 17:52:56 UTC] active_events=4 open_positions=5 capital_remaining=$2950.42
+[2026-03-14 17:53:02 UTC] active_events=4 open_positions=5 capital_remaining=$2950.42
+[2026-03-14 17:53:07 UTC] active_events=4 open_positions=5 capital_remaining=$2950.42
+nohup: ignoring input
+Loaded params from /home/ubuntu/gtc-trading/data/deribit/bates_params_implied.json
+[2026-03-14 18:08:22 UTC] active_events=4 open_positions=5 capital_remaining=$2950.42
+  PAPER FILL SELL GEMI-BTC2603141900-HI70500 qty=730 entry=0.760 model=0.579 edge=0.181
+  PAPER FILL BUY GEMI-BTC2603141900-HI70750 qty=893 entry=0.180 model=0.370 edge=0.190
+[2026-03-14 18:08:28 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:08:33 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:08:38 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:08:44 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:08:50 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:08:55 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:00 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:06 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:12 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:18 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:23 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:29 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:34 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:40 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:45 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:51 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:09:56 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:02 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:08 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:13 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:19 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:24 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:30 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:35 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:41 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:46 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:52 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:10:57 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
+[2026-03-14 18:11:03 UTC] active_events=4 open_positions=7 capital_remaining=$2614.48
