@@ -39,22 +39,35 @@ from strategy.scenario_matrix import (
 BASE = "https://api.gemini.com"
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "paper.ec2.json"
 DEFAULT_PARAMS_FALLBACK = PROJECT_ROOT / "data" / "deribit" / "bates_params_implied.json"
-DEFAULT_SPOT_HISTORY_PATH = PROJECT_ROOT / "data" / "gemini_spot" / "BTCUSD_composite.csv"
-DEFAULT_SPOT_SUPPLEMENT_PATH = PROJECT_ROOT / "data" / "gemini_spot" / "BTCUSD_binance_supplement_1m.csv"
 
 
-def load_config() -> tuple[StrategyConfig, Path | None]:
+def resolve_project_path(path_str: str | None) -> Path | None:
+    if not path_str:
+        return None
+    raw = Path(path_str).expanduser()
+    if raw.is_absolute():
+        return raw.resolve()
+    return (PROJECT_ROOT / raw).resolve()
+
+
+def load_config(config_path_override: str | None = None) -> tuple[StrategyConfig, Path | None]:
+    explicit = resolve_project_path(config_path_override)
+    if explicit is not None:
+        return StrategyConfig.load(str(explicit)), explicit
     if DEFAULT_CONFIG_PATH.exists():
         return StrategyConfig.load(str(DEFAULT_CONFIG_PATH)), DEFAULT_CONFIG_PATH
     return StrategyConfig(), None
 
 
-def resolve_positions_path(cfg: StrategyConfig) -> Path:
-    return (PROJECT_ROOT / cfg.positions_path).resolve()
+def resolve_positions_path(cfg: StrategyConfig, positions_path_override: str | None = None) -> Path:
+    explicit = resolve_project_path(positions_path_override)
+    if explicit is not None:
+        return explicit
+    return resolve_project_path(cfg.positions_path) or (PROJECT_ROOT / cfg.positions_path).resolve()
 
 
-def resolve_params_path(cfg: StrategyConfig) -> Path:
-    preferred = (PROJECT_ROOT / cfg.params_path).resolve()
+def resolve_params_path(cfg: StrategyConfig, params_path_override: str | None = None) -> Path:
+    preferred = resolve_project_path(params_path_override) or resolve_project_path(cfg.params_path)
     if preferred.exists():
         return preferred
     if DEFAULT_PARAMS_FALLBACK.exists():
@@ -62,16 +75,6 @@ def resolve_params_path(cfg: StrategyConfig) -> Path:
     raise FileNotFoundError(
         f"Could not find Bates params file at {preferred} or {DEFAULT_PARAMS_FALLBACK}"
     )
-
-
-def latest_spot_from_csv(path: Path) -> float | None:
-    if not path.exists():
-        return None
-    latest_close: float | None = None
-    frame = pd.read_csv(path, usecols=["close"])
-    if not frame.empty:
-        latest_close = float(frame["close"].iloc[-1])
-    return latest_close
 
 
 def fetch_live_spot_price() -> float | None:
@@ -90,25 +93,25 @@ def fetch_live_spot_price() -> float | None:
         return None
 
 
-def resolve_spot_price(params: BatesParams) -> tuple[float, str]:
+def resolve_spot_price() -> tuple[float | None, str]:
     live_spot = fetch_live_spot_price()
     if live_spot is not None:
-        return live_spot, "gemini api"
+        st.session_state["last_live_btc_spot"] = float(live_spot)
+        return float(live_spot), "gemini api"
 
-    supplement_spot = latest_spot_from_csv(DEFAULT_SPOT_SUPPLEMENT_PATH)
-    if supplement_spot is not None:
-        return supplement_spot, DEFAULT_SPOT_SUPPLEMENT_PATH.name
+    cached_spot = st.session_state.get("last_live_btc_spot")
+    if cached_spot is not None:
+        return float(cached_spot), "cached live api"
 
-    composite_spot = latest_spot_from_csv(DEFAULT_SPOT_HISTORY_PATH)
-    if composite_spot is not None:
-        return composite_spot, DEFAULT_SPOT_HISTORY_PATH.name
-
-    return float(params.S), "bates params"
+    return None, "unavailable"
 
 
-def load_live_positions() -> tuple[list, list]:
-    cfg, _ = load_config()
-    position_log = PositionLog(str(resolve_positions_path(cfg)))
+def load_live_positions(
+    config_path_override: str | None = None,
+    positions_path_override: str | None = None,
+) -> tuple[list, list]:
+    cfg, _ = load_config(config_path_override)
+    position_log = PositionLog(str(resolve_positions_path(cfg, positions_path_override)))
     positions = position_log.open_positions()
     now = dt.datetime.now(dt.timezone.utc)
 
@@ -160,16 +163,22 @@ def auto_refresh(interval_seconds: int) -> None:
 
 
 def render_live_dashboard(
+    config_path_override: str | None,
+    positions_path_override: str | None,
+    params_path_override: str | None,
     price_range_pct: float,
     price_step: int,
     time_step_hours: int,
     hours_past_expiry: int,
 ) -> None:
-    cfg, _ = load_config()
-    params_path = resolve_params_path(cfg)
+    cfg, _ = load_config(config_path_override)
+    params_path = resolve_params_path(cfg, params_path_override)
     params = BatesParams.load(str(params_path))
 
-    active_positions, expired_open_positions = load_live_positions()
+    active_positions, expired_open_positions = load_live_positions(
+        config_path_override=config_path_override,
+        positions_path_override=positions_path_override,
+    )
     if expired_open_positions:
         st.warning(
             f"{len(expired_open_positions)} open positions are already past expiry and were excluded from the live matrix."
@@ -180,7 +189,10 @@ def render_live_dashboard(
         return
 
     as_of = dt.datetime.now(dt.timezone.utc)
-    spot_price, spot_source = resolve_spot_price(params)
+    spot_price, spot_source = resolve_spot_price()
+    if spot_price is None:
+        st.error("Live BTC spot is unavailable and no prior API price has been cached yet.")
+        return
     contracts = [contract_from_position(position) for position in active_positions]
     last_expiry = max(contract.expiry_dt for contract in contracts)
     horizon_dt = max(last_expiry + dt.timedelta(hours=hours_past_expiry), as_of)
@@ -364,18 +376,24 @@ def main() -> None:
     )
     st.title("BTC Paper Portfolio Scenario Matrix")
 
-    cfg, config_path = load_config()
-    params_path = resolve_params_path(cfg)
+    default_config_value = str(DEFAULT_CONFIG_PATH.relative_to(PROJECT_ROOT)) if DEFAULT_CONFIG_PATH.exists() else ""
 
     with st.sidebar:
         st.header("Controls")
+        config_path_override = st.text_input("Config path", value=default_config_value)
+        positions_path_override = st.text_input("Positions path override", value="")
+        params_path_override = st.text_input("Params path override", value="")
         refresh_seconds = st.slider("Auto-refresh seconds", min_value=0, max_value=60, value=10, step=5)
         price_range_pct = st.slider("Price range around current BTC", min_value=0.02, max_value=0.20, value=0.08, step=0.01)
         price_step = st.slider("Price step (USD)", min_value=50, max_value=1000, value=100, step=50)
         time_step_hours = st.slider("Time step (hours)", min_value=1, max_value=6, value=1, step=1)
         hours_past_expiry = st.slider("Hours past final expiry", min_value=0, max_value=6, value=2, step=1)
+        cfg, config_path = load_config(config_path_override or None)
+        effective_positions_path = resolve_positions_path(cfg, positions_path_override or None)
+        effective_params_path = resolve_params_path(cfg, params_path_override or None)
         st.caption(f"Config: {config_path if config_path else 'default StrategyConfig values'}")
-        st.caption(f"Params: {params_path}")
+        st.caption(f"Positions: {effective_positions_path}")
+        st.caption(f"Params: {effective_params_path}")
         if st.button("Refresh Now", use_container_width=True):
             st.rerun()
 
@@ -385,6 +403,9 @@ def main() -> None:
             @fragment_api(run_every=f"{refresh_seconds}s")
             def live_fragment() -> None:
                 render_live_dashboard(
+                    config_path_override=config_path_override or None,
+                    positions_path_override=positions_path_override or None,
+                    params_path_override=params_path_override or None,
                     price_range_pct=price_range_pct,
                     price_step=price_step,
                     time_step_hours=time_step_hours,
@@ -394,6 +415,9 @@ def main() -> None:
             @fragment_api
             def live_fragment() -> None:
                 render_live_dashboard(
+                    config_path_override=config_path_override or None,
+                    positions_path_override=positions_path_override or None,
+                    params_path_override=params_path_override or None,
                     price_range_pct=price_range_pct,
                     price_step=price_step,
                     time_step_hours=time_step_hours,
@@ -408,6 +432,9 @@ def main() -> None:
         )
         auto_refresh(refresh_seconds)
         render_live_dashboard(
+            config_path_override=config_path_override or None,
+            positions_path_override=positions_path_override or None,
+            params_path_override=params_path_override or None,
             price_range_pct=price_range_pct,
             price_step=price_step,
             time_step_hours=time_step_hours,
