@@ -1,7 +1,8 @@
 {
-  "total_capital_usd": 100.0,
-  "flat_amount_usd": 10.0,
-  "max_open_positions": 5,
+  "total_capital_usd": 3000.0,
+  "sizing_mode": "kelly",
+  "kelly_fraction": 0.25,
+  "max_open_positions": 200,
   "poll_interval_seconds": 5.0,
   "positions_path": "data/strategy/positions.ec2.json",
   "paper_trades_path": "data/strategy/paper_trades.ec2.csv"
