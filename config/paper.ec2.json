@@ -4,6 +4,6 @@
   "kelly_fraction": 0.25,
   "max_open_positions": 200,
   "poll_interval_seconds": 5.0,
-  "positions_path": "data/strategy/positions.ec2.json",
-  "paper_trades_path": "data/strategy/paper_trades.ec2.csv"
+  "positions_path": "data/strategy/positions.ec2.v2.json",
+  "paper_trades_path": "data/strategy/paper_trades.ec2.v2.csv"
 }
