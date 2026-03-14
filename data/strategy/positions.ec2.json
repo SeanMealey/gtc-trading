@@ -2367,5 +2367,28 @@
     "settlement_outcome": null,
     "settlement_time": "",
     "params_path": "/home/ubuntu/gtc-trading/data/deribit/bates_params_implied.json"
+  },
+  {
+    "instrument": "GEMI-BTC2603142000-HI71000",
+    "event_ticker": "BTC2603142000",
+    "side": "buy",
+    "outcome": "yes",
+    "quantity": 2067,
+    "entry_price": 0.05,
+    "entry_model_price": 0.19480793164914748,
+    "edge_at_entry": 0.14480793164914746,
+    "entry_time": "2026-03-14T19:18:52Z",
+    "expiry_time": "2026-03-14T20:00:00Z",
+    "order_id": "paper-GEMI-BTC2603142000-HI71000-1773515932",
+    "settlement_index": "GRR-KAIKO_BTCUSD_1S",
+    "status": "open",
+    "spot_at_entry": 70699.25,
+    "bid_at_entry": 0.01,
+    "ask_at_entry": 0.05,
+    "bid_size_at_entry": 37.0,
+    "ask_size_at_entry": 37.0,
+    "settlement_outcome": null,
+    "settlement_time": "",
+    "params_path": "/home/ubuntu/gtc-trading/data/deribit/bates_params_implied.json"
   }
 ]
