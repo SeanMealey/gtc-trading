@@ -1,4 +1,5 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include "bates.hpp"
 #include "cos_pricer.hpp"
@@ -43,6 +44,38 @@ PYBIND11_MODULE(bates_pricer, m) {
         },
         py::arg("K"), py::arg("T"), py::arg("params"), py::arg("N") = 256,
         "Cash-or-nothing binary call price via COS method. Returns e^{-rT} * Q(S(T) > K).");
+
+    m.def("binary_call_batch",
+        [](double K,
+           double T,
+           const bates::Params& p,
+           py::array_t<double, py::array::c_style | py::array::forcecast> spots,
+           int N) {
+            auto spot_view = spots.unchecked<1>();
+            std::vector<double> spot_vec(static_cast<std::size_t>(spot_view.shape(0)));
+            for (py::ssize_t idx = 0; idx < spot_view.shape(0); ++idx) {
+                spot_vec[static_cast<std::size_t>(idx)] = spot_view(idx);
+            }
+
+            std::vector<double> prices;
+            {
+                py::gil_scoped_release release;
+                prices = cos_pricer::binary_call_batch(K, T, p, spot_vec, N);
+            }
+
+            py::array_t<double> out(prices.size());
+            auto out_view = out.mutable_unchecked<1>();
+            for (py::ssize_t idx = 0; idx < out_view.shape(0); ++idx) {
+                out_view(idx) = prices[static_cast<std::size_t>(idx)];
+            }
+            return out;
+        },
+        py::arg("K"),
+        py::arg("T"),
+        py::arg("params"),
+        py::arg("spots"),
+        py::arg("N") = 256,
+        "Cash-or-nothing binary call prices across a spot array via COS method.");
 
     m.def("binary_put",
         [](double K, double T, const bates::Params& p, int N) {

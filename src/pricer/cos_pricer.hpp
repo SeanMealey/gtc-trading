@@ -189,6 +189,63 @@ inline double binary_call(
 }
 
 /**
+ * Price a batch of cash-or-nothing binary calls over a spot grid.
+ *
+ * This reuses the COS characteristic-function terms that are common across the
+ * whole price axis and only recomputes the payoff coefficients for each spot.
+ */
+inline std::vector<double> binary_call_batch(
+        double K, double T, const bates::Params& p,
+        const std::vector<double>& spots, int N = 256) {
+    std::vector<double> prices(spots.size(), 0.0);
+    if (spots.empty()) {
+        return prices;
+    }
+    if (K <= 0.0) {
+        double discounted = (T <= 0.0) ? 1.0 : std::exp(-p.r * T);
+        std::fill(prices.begin(), prices.end(), discounted);
+        return prices;
+    }
+    if (T <= 0.0) {
+        for (std::size_t idx = 0; idx < spots.size(); ++idx) {
+            prices[idx] = (spots[idx] > K) ? 1.0 : 0.0;
+        }
+        return prices;
+    }
+
+    auto [a, b] = truncation_interval(T, p);
+    double bma = b - a;
+
+    std::vector<double> cos_weights(N, 0.0);
+    for (int k = 0; k < N; ++k) {
+        double u = k * M_PI / bma;
+        cd phi = bates::characteristic_function(cd(u, 0.0), T, p);
+        cd exp_term = std::exp(cd(0.0, -u * a));
+        double re = std::real(phi * exp_term);
+        double weight = (k == 0) ? 0.5 : 1.0;
+        cos_weights[k] = weight * re;
+    }
+
+    double discount = std::exp(-p.r * T);
+    for (std::size_t idx = 0; idx < spots.size(); ++idx) {
+        double S = spots[idx];
+        if (S <= 0.0) {
+            prices[idx] = 0.0;
+            continue;
+        }
+
+        auto V = payoff_coefficients(K, S, a, b, N);
+        double sum = 0.0;
+        for (int k = 0; k < N; ++k) {
+            if (V[k] == 0.0) continue;
+            sum += cos_weights[k] * V[k];
+        }
+        prices[idx] = discount * std::max(0.0, std::min(1.0, sum));
+    }
+    return prices;
+}
+
+/**
  * Price a cash-or-nothing binary put (pays $1 if S(T) < K).
  *   P_bin = e^{-rT} * Q(S(T) < K) = e^{-rT} - C_bin
  */

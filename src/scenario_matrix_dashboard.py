@@ -28,11 +28,11 @@ from calibration.params import BatesParams
 from strategy.config import StrategyConfig
 from strategy.position_log import PositionLog
 from strategy.scenario_matrix import (
+    bates_implied_price_probabilities,
     build_portfolio_surface,
     build_scenario_grid,
     compute_surface_metrics,
     contract_from_position,
-    lognormal_price_probabilities,
 )
 
 
@@ -208,13 +208,11 @@ def render_live_dashboard(
     surface = build_portfolio_surface(contracts=contracts, params=params, grid=grid)
 
     terminal_horizon_years = max((grid.evaluation_times[-1] - as_of).total_seconds(), 3600.0) / (365.25 * 24 * 3600)
-    sigma = max(math.sqrt(max(params.v0, 1e-8)), 0.05)
-    probabilities = lognormal_price_probabilities(
+    probabilities = bates_implied_price_probabilities(
+        params=params,
         spot_price=spot_price,
         prices=grid.prices,
         horizon_years=terminal_horizon_years,
-        sigma=sigma,
-        risk_free_rate=params.r,
     )
     metrics = compute_surface_metrics(surface, probability_weights=probabilities)
 

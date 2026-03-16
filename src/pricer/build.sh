@@ -12,12 +12,24 @@ PY_EXT=$($PYTHON -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFI
 
 OUT="bates_pricer${PY_EXT}"
 
+EXTRA_LDFLAGS=()
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    EXTRA_LDFLAGS+=("-undefined" "dynamic_lookup")
+else
+    PY_LDFLAGS=$($PYTHON -c "import sysconfig; print(sysconfig.get_config_var('LDFLAGS') or '')")
+    if [[ -n "${PY_LDFLAGS}" ]]; then
+        # shellcheck disable=SC2206
+        EXTRA_LDFLAGS+=(${PY_LDFLAGS})
+    fi
+fi
+
 g++ -O3 -march=native -std=c++20 \
     -shared -fPIC \
     -I"${PYBIND_INC}" \
     -I"${PY_INC}" \
     -I"." \
     bindings.cpp \
+    "${EXTRA_LDFLAGS[@]}" \
     -o "${OUT}"
 
 echo "Built: $(pwd)/${OUT}"

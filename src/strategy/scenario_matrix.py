@@ -244,17 +244,39 @@ def build_portfolio_surface(
     grid: ScenarioGrid,
 ) -> ScenarioSurface:
     surface = np.zeros((len(grid.evaluation_times), len(grid.prices)), dtype=float)
-    for time_idx, evaluation_time in enumerate(grid.evaluation_times):
-        for price_idx, simulated_spot in enumerate(grid.prices):
-            pnl = 0.0
-            for contract in contracts:
-                pnl += contract_pnl_at_node(
-                    contract=contract,
-                    params=params,
-                    simulated_spot=float(simulated_spot),
-                    evaluation_time=evaluation_time,
+    if not contracts:
+        return ScenarioSurface(grid=grid, pnl=surface)
+
+    bp = _load_pricer()
+    pricer_params = params.to_pricer_params()
+    price_axis = np.asarray(grid.prices, dtype=float)
+
+    for contract in contracts:
+        for time_idx, evaluation_time in enumerate(grid.evaluation_times):
+            if evaluation_time >= contract.expiry_dt:
+                contract_values = (price_axis >= contract.strike).astype(float)
+            else:
+                time_to_expiry_years = max(
+                    (contract.expiry_dt - evaluation_time).total_seconds(),
+                    0.0,
+                ) / SECONDS_PER_YEAR
+                contract_values = np.asarray(
+                    bp.binary_call_batch(
+                        float(contract.strike),
+                        float(time_to_expiry_years),
+                        pricer_params,
+                        price_axis,
+                        N=256,
+                    ),
+                    dtype=float,
                 )
-            surface[time_idx, price_idx] = pnl
+
+            if contract.side == "buy":
+                surface[time_idx] += (contract_values - contract.entry_price) * contract.quantity
+            elif contract.side == "sell":
+                surface[time_idx] += (contract.entry_price - contract_values) * contract.quantity
+            else:
+                raise ValueError(f"unsupported side: {contract.side!r}")
     return ScenarioSurface(grid=grid, pnl=surface)
 
 
@@ -387,6 +409,47 @@ def lognormal_price_probabilities(
         probabilities[nearest_idx] = 1.0
         return probabilities
     return probabilities / total
+
+
+def bates_implied_price_probabilities(
+    params: BatesParams,
+    spot_price: float,
+    prices: np.ndarray,
+    horizon_years: float,
+    N: int = 256,
+) -> np.ndarray:
+    if spot_price <= 0:
+        raise ValueError("spot_price must be positive")
+    if len(prices) == 0:
+        raise ValueError("prices must not be empty")
+    if len(prices) == 1 or horizon_years <= 0:
+        probabilities = np.zeros(len(prices), dtype=float)
+        nearest_idx = int(np.argmin(np.abs(prices - spot_price)))
+        probabilities[nearest_idx] = 1.0
+        return probabilities
+
+    bp = _load_pricer()
+    pricer_params = params.to_pricer_params()
+    pricer_params.S = float(spot_price)
+
+    mids = (prices[:-1] + prices[1:]) / 2.0
+    tail_probabilities = np.asarray(
+        [
+            bp.binary_call_prob(float(strike), float(horizon_years), pricer_params, N=N)
+            for strike in mids
+        ],
+        dtype=float,
+    )
+    tail_probabilities = np.clip(tail_probabilities, 0.0, 1.0)
+    tail_probabilities = np.minimum.accumulate(tail_probabilities)
+
+    probabilities = np.empty(len(prices), dtype=float)
+    probabilities[0] = 1.0 - tail_probabilities[0]
+    if len(prices) > 2:
+        probabilities[1:-1] = tail_probabilities[:-1] - tail_probabilities[1:]
+    probabilities[-1] = tail_probabilities[-1]
+    probabilities = np.clip(probabilities, 0.0, None)
+    return _normalize_probabilities(probabilities)
 
 
 def compare_candidate_trade(
