@@ -1,5 +1,8 @@
 {
   "total_capital_usd": 3000.0,
+  "min_edge": 0.03,
+  "buy_min_edge": 0.05,
+  "sell_min_edge": 0.08,
   "sizing_mode": "flat",
   "flat_amount_usd": 50.0,
   "max_open_positions": 400,

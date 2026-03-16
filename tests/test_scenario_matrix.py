@@ -10,13 +10,16 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "pricer"))
 
+import bates_pricer as bp
 from calibration.params import BatesParams
 from strategy.scenario_matrix import (
     ScenarioContract,
     ScenarioGrid,
     ScenarioRiskLimits,
     ScenarioSurface,
+    bates_implied_price_probabilities,
     build_portfolio_surface,
     build_scenario_grid,
     compare_candidate_trade,
@@ -182,6 +185,62 @@ class ScenarioMatrixTests(unittest.TestCase):
 
         np.testing.assert_allclose(probabilities.sum(), 1.0)
         self.assertEqual(int(np.argmax(probabilities)), 2)
+
+    def test_binary_call_batch_matches_scalar_pricer(self) -> None:
+        pricer_params = self.params.to_pricer_params()
+        spots = np.asarray([95000.0, 97500.0, 100000.0, 102500.0, 105000.0], dtype=float)
+
+        batch_prices = np.asarray(
+            bp.binary_call_batch(100000.0, 1.0 / 365.25, pricer_params, spots, N=128),
+            dtype=float,
+        )
+        scalar_prices = np.asarray(
+            [bp.binary_call(100000.0, 1.0 / 365.25, _params_with_spot(pricer_params, spot), N=128) for spot in spots],
+            dtype=float,
+        )
+
+        np.testing.assert_allclose(batch_prices, scalar_prices, rtol=1e-10, atol=1e-10)
+
+    def test_bates_implied_price_probabilities_sum_to_one(self) -> None:
+        prices = np.asarray([95000.0, 97500.0, 100000.0, 102500.0, 105000.0], dtype=float)
+        probabilities = bates_implied_price_probabilities(
+            params=self.params,
+            spot_price=100000.0,
+            prices=prices,
+            horizon_years=1.0 / 365.25,
+            N=128,
+        )
+
+        self.assertEqual(len(probabilities), len(prices))
+        self.assertTrue(np.all(probabilities >= 0.0))
+        np.testing.assert_allclose(probabilities.sum(), 1.0, rtol=0.0, atol=1e-12)
+
+    def test_bates_implied_price_probabilities_match_tail_differences(self) -> None:
+        prices = np.asarray([95000.0, 97500.0, 100000.0, 102500.0, 105000.0], dtype=float)
+        probabilities = bates_implied_price_probabilities(
+            params=self.params,
+            spot_price=100000.0,
+            prices=prices,
+            horizon_years=1.0 / 365.25,
+            N=128,
+        )
+        mids = (prices[:-1] + prices[1:]) / 2.0
+        pricer_params = self.params.to_pricer_params()
+        pricer_params.S = 100000.0
+        tails = np.asarray(
+            [bp.binary_call_prob(float(strike), 1.0 / 365.25, pricer_params, N=128) for strike in mids],
+            dtype=float,
+        )
+        tails = np.minimum.accumulate(np.clip(tails, 0.0, 1.0))
+
+        self.assertAlmostEqual(probabilities[0], 1.0 - tails[0], places=12)
+        np.testing.assert_allclose(probabilities[1:-1], tails[:-1] - tails[1:], rtol=0.0, atol=1e-12)
+        self.assertAlmostEqual(probabilities[-1], tails[-1], places=12)
+
+
+def _params_with_spot(pricer_params, spot: float):
+    pricer_params.S = float(spot)
+    return pricer_params
 
 
 if __name__ == "__main__":

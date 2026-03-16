@@ -17,6 +17,8 @@ class StrategyConfig:
     min_edge: float = 0.03          # realizable edge required to enter
                                     # BUY: model - ask >= min_edge
                                     # SELL: bid - model >= min_edge
+    buy_min_edge: float | None = None
+    sell_min_edge: float | None = None
     model_min: float = 0.15         # reject if model < model_min (deep ITM for seller)
     model_max: float = 0.85         # reject if model > model_max (deep ITM for buyer)
     max_t_days: float = 7.0         # reject contracts with T > max_t_days until expiry
@@ -63,6 +65,12 @@ class StrategyConfig:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w") as f:
             json.dump(asdict(self), f, indent=2)
+
+    def effective_buy_min_edge(self) -> float:
+        return self.min_edge if self.buy_min_edge is None else self.buy_min_edge
+
+    def effective_sell_min_edge(self) -> float:
+        return self.min_edge if self.sell_min_edge is None else self.sell_min_edge
 
     @classmethod
     def load(cls, path: str) -> StrategyConfig:
