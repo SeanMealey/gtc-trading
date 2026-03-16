@@ -1,0 +1,9 @@
+# run persistant paper trader
+nohup python -u src/strategy/paper_runner.py --config config/paper.ec2.json >> logs/paper_runner_v2.log 2>&1 & echo $! > 
+logs/paper_runner_v2.pid
+
+# check paper trade is live
+pgrep -af "src/strategy/paper_runner.py"
+
+# kill paper trader
+pkill -f "src/strategy/paper_runner.py"
