@@ -322,15 +322,19 @@ def _bs_iv_batch(prices: np.ndarray, F_arr: np.ndarray, K_arr: np.ndarray,
     intrinsic = np.maximum(0.0, discount * (F_arr - K_arr))
     valid     = (prices > intrinsic + 1e-12) & (prices < discount * F_arr - 1e-12)
 
-    sigma = np.full(len(prices), 0.5)
+    sigma = np.full(len(prices), 0.5, dtype=float)
 
     for _ in range(n_iter):
         d1   = (np.log(F_arr / K_arr) + 0.5 * sigma**2 * T) / (sigma * sqT)
         d2   = d1 - sigma * sqT
         c    = discount * (F_arr * norm.cdf(d1) - K_arr * norm.cdf(d2))
         vega = discount * F_arr * norm.pdf(d1) * sqT
-        step = np.where((vega > 1e-14) & valid, (c - prices) / vega, 0.0)
+        step = np.zeros_like(sigma)
+        updatable = valid & (vega > 1e-14) & np.isfinite(c) & np.isfinite(vega)
+        step[updatable] = (c[updatable] - prices[updatable]) / vega[updatable]
         sigma = np.clip(sigma - step, 1e-6, 20.0)
+        if updatable.any() and np.max(np.abs(c[updatable] - prices[updatable])) < 1e-8:
+            break
 
     return np.where(valid, sigma, np.nan)
 
@@ -446,12 +450,54 @@ def _objective(x: np.ndarray,
             T, N, kappa, theta, sigma_v, rho, v0, r, q, lam, mu_j, sigma_j
         )
         prices   = _vanilla_calls_batch(K_arr, S_expiry, a, b, bma, k_arr, wrp, r, T)
+        if not np.all(np.isfinite(prices)):
+            return 1e12
         iv_model = _bs_iv_batch(prices, F_arr, K_arr, T, r)
+        valid_iv = np.isfinite(iv_model)
+        invalid_count = int((~valid_iv).sum())
+        if invalid_count > max(2, len(pts) // 4):
+            return 1e12 + float(np.sum(w_arr[~valid_iv]) * 25.0)
 
-        err_sq = np.where(np.isnan(iv_model), 1.0, (iv_model - miv) ** 2)
+        err_sq = np.empty_like(miv)
+        err_sq[valid_iv] = (iv_model[valid_iv] - miv[valid_iv]) ** 2
+        err_sq[~valid_iv] = 25.0
         total += float(np.dot(w_arr, err_sq))
 
     return total
+
+
+def _score_candidate(x: np.ndarray,
+                     points_by_expiry: dict,
+                     r: float,
+                     q: float,
+                     N: int) -> float:
+    """Safely score a parameter vector, returning +inf if evaluation fails."""
+    try:
+        score = float(_objective(x, points_by_expiry, r, q, N))
+    except (ArithmeticError, FloatingPointError, OverflowError, ValueError):
+        return float("inf")
+    return score if math.isfinite(score) else float("inf")
+
+
+def _load_saved_candidate(output_path: str) -> np.ndarray | None:
+    """Load a previously saved Bates parameter vector if present and valid."""
+    if not os.path.exists(output_path):
+        return None
+
+    try:
+        with open(output_path) as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    keys = ("v0", "kappa", "theta", "sigma_v", "rho", "lam", "mu_j", "sigma_j")
+    if any(key not in raw for key in keys):
+        return None
+
+    x = np.array([raw[key] for key in keys], dtype=float)
+    if not np.all(np.isfinite(x)):
+        return None
+    return x
 
 
 # ===========================================================================
@@ -468,6 +514,7 @@ def calibrate(
     mono_hi: float = 1.35,
     max_per_expiry: int = 20,
     N_cos: int = 64,
+    de_N_cos: int | None = None,
     output_path: str = _OUT_PATH,
 ) -> BatesParams:
     """
@@ -483,12 +530,20 @@ def calibrate(
     mono_lo/hi      K/F moneyness range
     max_per_expiry  Max options per expiry in calibration set
     N_cos           COS terms for vanilla call pricing (64 → ~5-digit accuracy)
+    de_N_cos        COS terms for the DE search (defaults to N_cos)
     output_path     Where to save BatesParams JSON
 
     Returns
     -------
     BatesParams  (calibration_source = "implied")
     """
+    if N_cos <= 0:
+        raise ValueError("N_cos must be positive")
+    if de_N_cos is None:
+        de_N_cos = N_cos
+    if de_N_cos <= 0:
+        raise ValueError("de_N_cos must be positive")
+
     # ------------------------------------------------------------------ #
     # Load chain
     # ------------------------------------------------------------------ #
@@ -568,19 +623,25 @@ def calibrate(
         (0.01, 0.5),    # sigma_j
     ]
 
+    saved_x = _load_saved_candidate(output_path)
+    candidate_pool: list[tuple[str, np.ndarray]] = [("initial guess", x0)]
+    if saved_x is not None:
+        candidate_pool.append(("saved params", saved_x))
+
     # ------------------------------------------------------------------ #
     # Optimise  (global DE pass → local L-BFGS-B polish)
     # ------------------------------------------------------------------ #
     # Differential evolution avoids the Bates degeneracy (λ→∞, σ_j→0) that
     # local gradient methods fall into when the jump component is weakly
-    # identified. DE explores the full parameter space at low cost (N_cos=32
-    # for speed), then L-BFGS-B polishes at full resolution.
-    print(f"\nRunning differential evolution  (N_cos=32, {len(points)} pts)...")
+    # identified. We score all downstream candidates at full resolution before
+    # the local polish step so the optimizer starts from the most trustworthy
+    # point we have.
+    print(f"\nRunning differential evolution  (N_cos={de_N_cos}, {len(points)} pts)...")
     t0 = time.perf_counter()
     de_result = differential_evolution(
         _objective,
         bounds,
-        args=(points_by_expiry, r, q, 32),
+        args=(points_by_expiry, r, q, de_N_cos),
         seed=42,
         maxiter=200,
         popsize=8,
@@ -589,12 +650,34 @@ def calibrate(
         workers=1,
     )
     print(f"  DE best SSE: {de_result.fun:.8f}  ({time.perf_counter()-t0:.1f}s)")
+    de_full_sse = _score_candidate(de_result.x, points_by_expiry, r, q, N_cos)
+    if de_N_cos != N_cos:
+        print(f"  DE candidate rescored at N_cos={N_cos}: {de_full_sse:.8f}")
+    candidate_pool.append(("DE candidate", de_result.x.copy()))
+
+    scored_candidates: list[tuple[float, str, np.ndarray]] = []
+    print("Full-resolution candidate SSEs:")
+    for label, x in candidate_pool:
+        score = _score_candidate(x, points_by_expiry, r, q, N_cos)
+        if math.isfinite(score):
+            scored_candidates.append((score, label, x.copy()))
+            print(f"  {label:>13}: {score:.8f}")
+        else:
+            print(f"  {label:>13}: inf")
+
+    if not scored_candidates:
+        raise RuntimeError("Calibration failed before polish; no finite candidate found.")
+
+    best_start_score, best_start_label, best_start_x = min(
+        scored_candidates, key=lambda item: item[0]
+    )
+    print(f"Polish start: {best_start_label}  (SSE={best_start_score:.8f})")
 
     print(f"Running L-BFGS-B polish  (N_cos={N_cos})...")
     t1 = time.perf_counter()
     result = minimize(
         _objective,
-        de_result.x,
+        best_start_x,
         args=(points_by_expiry, r, q, N_cos),
         method="L-BFGS-B",
         bounds=bounds,
@@ -605,13 +688,29 @@ def calibrate(
     print(f"Converged: {result.success}  |  iterations: {result.nit}  |  "
           f"polish time: {elapsed:.1f}s  |  total: {time.perf_counter()-t0:.1f}s")
     print(f"Final SSE: {result.fun:.8f}")
-    if not result.success:
+    polish_score = _score_candidate(result.x, points_by_expiry, r, q, N_cos)
+    if math.isfinite(polish_score):
+        scored_candidates.append((polish_score, "polish result", result.x.copy()))
+
+    best_score, best_label, best_x = min(scored_candidates, key=lambda item: item[0])
+    if not math.isfinite(best_score) or best_score >= 1e11:
         raise RuntimeError(
-            "Calibration did not converge; refusing to save parameters. "
-            f"status={result.status} message={result.message!r}"
+            "Calibration did not find a usable full-resolution candidate. "
+            f"polish_status={result.status} message={result.message!r}"
         )
 
-    v0, kappa, theta, sigma_v, rho, lam, mu_j, sigma_j = result.x
+    if not result.success:
+        print(
+            "Polish exited early; retaining best full-resolution candidate "
+            f"from {best_label}  (SSE={best_score:.8f}, status={result.status})"
+        )
+    elif best_label != "polish result":
+        print(
+            "Polish converged but did not improve the full-resolution fit; "
+            f"retaining {best_label}  (SSE={best_score:.8f})"
+        )
+
+    v0, kappa, theta, sigma_v, rho, lam, mu_j, sigma_j = best_x
 
     # ------------------------------------------------------------------ #
     # Fit diagnostics
@@ -679,6 +778,7 @@ if __name__ == "__main__":
     parser.add_argument("--min-oi",   type=float, default=10.0,  help="Min open interest (BTC)")
     parser.add_argument("--min-tte",  type=float, default=3.0,   help="Min time to expiry (days)")
     parser.add_argument("--N",        type=int,   default=64,    help="COS terms")
+    parser.add_argument("--de-N",     type=int,   default=None,  help="COS terms for DE search")
     args = parser.parse_args()
 
     calibrate(
@@ -687,5 +787,6 @@ if __name__ == "__main__":
         min_oi        = args.min_oi,
         min_tte_days  = args.min_tte,
         N_cos         = args.N,
+        de_N_cos      = args.de_N,
         output_path   = args.output,
     )
