@@ -3,6 +3,8 @@
   "min_edge": 0.03,
   "buy_min_edge": 0.05,
   "sell_min_edge": 0.08,
+  "buy_min_price": 0.15,
+  "sell_max_price": 0.85,
   "sizing_mode": "flat",
   "flat_amount_usd": 50.0,
   "max_open_positions": 400,

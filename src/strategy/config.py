@@ -21,6 +21,8 @@ class StrategyConfig:
     sell_min_edge: float | None = None
     model_min: float = 0.15         # reject if model < model_min (deep ITM for seller)
     model_max: float = 0.85         # reject if model > model_max (deep ITM for buyer)
+    buy_min_price: float = 0.15     # reject buys below this ask price
+    sell_max_price: float = 0.85    # reject sells above this bid price
     max_t_days: float = 7.0         # reject contracts with T > max_t_days until expiry
 
     # ── Liquidity Gate ────────────────────────────────────────────────────────

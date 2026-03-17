@@ -40,7 +40,8 @@ def generate_signal(
       1. Model in tradeable zone [model_min, model_max]
       2. T <= max_t_days
       3. Two-sided market (if require_two_sided)
-      4. BUY: model > ask + buy_min_edge
+      4. Side-aware entry price guardrails
+      5. BUY: model > ask + buy_min_edge
          SELL: bid > model + sell_min_edge
     """
     if model_price is None:
@@ -61,8 +62,12 @@ def generate_signal(
     buy_min_edge = cfg.effective_buy_min_edge()
     sell_min_edge = cfg.effective_sell_min_edge()
 
-    # 4a. BUY signal — model thinks contract is underpriced vs ask
-    if ask is not None and model_price >= ask + buy_min_edge:
+    # 4a/5a. BUY signal — require ask floor, then positive edge vs ask
+    if (
+        ask is not None
+        and ask >= cfg.buy_min_price
+        and model_price >= ask + buy_min_edge
+    ):
         return Signal(
             instrument=instrument,
             side="buy",
@@ -74,8 +79,12 @@ def generate_signal(
             T_years=T_years,
         )
 
-    # 4b. SELL signal — model thinks contract is overpriced vs bid
-    if bid is not None and bid >= model_price + sell_min_edge:
+    # 4b/5b. SELL signal — require bid cap, then positive edge vs bid
+    if (
+        bid is not None
+        and bid <= cfg.sell_max_price
+        and bid >= model_price + sell_min_edge
+    ):
         return Signal(
             instrument=instrument,
             side="sell",
