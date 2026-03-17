@@ -1,5 +1,0 @@
-nohup: ignoring input
-Traceback (most recent call last):
-  File "/home/ubuntu/gtc-trading/src/strategy/paper_runner.py", line 26, in <module>
-    import bates_pricer as bp
-ModuleNotFoundError: No module named 'bates_pricer'
