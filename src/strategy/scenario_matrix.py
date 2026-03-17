@@ -76,8 +76,11 @@ class ScenarioMetrics:
     expected_pnl: float | None
     terminal_negative_cells: int
     negative_cells: int
+    terminal_downside: float
     hole_ranges: tuple[HoleRange, ...]
     delta: np.ndarray
+    terminal_max_abs_delta: float
+    delta_abs_mean: float
     theta: np.ndarray
 
 
@@ -92,6 +95,8 @@ class ScenarioComparison:
     variance_improved: bool
     max_loss_improved: bool
     hole_reduced: bool
+    downside_improved: bool
+    delta_improved: bool
     expected_pnl_improved: bool | None
 
 
@@ -102,9 +107,14 @@ class ScenarioRiskLimits:
     max_payoff_variance: float | None = None
     min_expected_pnl: float | None = None
     min_max_loss: float | None = None
+    max_terminal_downside: float | None = None
+    max_terminal_abs_delta: float | None = None
     require_flatness_improvement: bool = False
     require_variance_improvement: bool = False
     require_hole_reduction: bool = False
+    require_downside_improvement: bool = False
+    require_delta_improvement: bool = False
+    require_expected_pnl_improvement: bool = False
 
 
 @dataclass(frozen=True)
@@ -350,6 +360,8 @@ def compute_surface_metrics(
     delta = _central_difference(pnl, grid.prices, axis=1)
     theta = _central_difference(pnl, grid.time_offsets_hours, axis=0)
     holes = detect_hole_ranges(target_row, grid.prices)
+    downside = np.clip(-target_row, 0.0, None)
+    terminal_delta = np.abs(delta[target_time_index])
 
     return ScenarioMetrics(
         flatness_by_time=row_stds,
@@ -362,8 +374,11 @@ def compute_surface_metrics(
         expected_pnl=expected_pnl,
         terminal_negative_cells=int((target_row < 0).sum()),
         negative_cells=int((pnl < 0).sum()),
+        terminal_downside=float(downside.sum()),
         hole_ranges=holes,
         delta=delta,
+        terminal_max_abs_delta=float(terminal_delta.max()) if len(terminal_delta) else 0.0,
+        delta_abs_mean=float(np.abs(delta).mean()),
         theta=theta,
     )
 
@@ -452,32 +467,65 @@ def bates_implied_price_probabilities(
     return _normalize_probabilities(probabilities)
 
 
-def compare_candidate_trade(
-    current_contracts: list[ScenarioContract] | tuple[ScenarioContract, ...],
-    candidate_contract: ScenarioContract,
+def probability_weights_for_grid(
     params: BatesParams,
-    as_of: dt.datetime,
     spot_price: float,
-    price_range_pct: float = 0.15,
-    price_step: float = 250.0,
-    time_step_hours: float = 4.0,
-    horizon_dt: dt.datetime | None = None,
+    grid: ScenarioGrid,
+    as_of: dt.datetime,
+    probability_method: str | None = None,
+    lognormal_sigma: float | None = None,
+) -> np.ndarray | None:
+    if probability_method is None:
+        return None
+
+    horizon_years = max(
+        (grid.evaluation_times[-1] - as_of).total_seconds(),
+        0.0,
+    ) / SECONDS_PER_YEAR
+    if horizon_years <= 0:
+        return None
+
+    if probability_method == "bates":
+        return bates_implied_price_probabilities(
+            params=params,
+            spot_price=spot_price,
+            prices=grid.prices,
+            horizon_years=horizon_years,
+        )
+    if probability_method == "lognormal":
+        sigma = lognormal_sigma
+        if sigma is None:
+            sigma = math.sqrt(max(params.v0, 1e-12))
+        return lognormal_price_probabilities(
+            spot_price=spot_price,
+            prices=grid.prices,
+            horizon_years=horizon_years,
+            sigma=sigma,
+            risk_free_rate=params.r,
+        )
+    raise ValueError(f"unsupported probability_method: {probability_method!r}")
+
+
+def compare_surface_addition(
+    current_surface: ScenarioSurface,
+    candidate_addition_surface: ScenarioSurface,
     probability_weights: np.ndarray | None = None,
 ) -> ScenarioComparison:
-    combined_contracts = list(current_contracts) + [candidate_contract]
-    grid = build_scenario_grid(
-        as_of=as_of,
-        spot_price=spot_price,
-        contracts=combined_contracts,
-        price_range_pct=price_range_pct,
-        price_step=price_step,
-        time_step_hours=time_step_hours,
-        horizon_dt=horizon_dt,
+    if current_surface.grid != candidate_addition_surface.grid:
+        raise ValueError("surface grids must match")
+
+    current_metrics = compute_surface_metrics(
+        current_surface,
+        probability_weights=probability_weights,
     )
-    current_surface = build_portfolio_surface(list(current_contracts), params=params, grid=grid)
-    candidate_surface = build_portfolio_surface(combined_contracts, params=params, grid=grid)
-    current_metrics = compute_surface_metrics(current_surface, probability_weights=probability_weights)
-    candidate_metrics = compute_surface_metrics(candidate_surface, probability_weights=probability_weights)
+    combined_surface = ScenarioSurface(
+        grid=current_surface.grid,
+        pnl=current_surface.pnl + candidate_addition_surface.pnl,
+    )
+    candidate_metrics = compute_surface_metrics(
+        combined_surface,
+        probability_weights=probability_weights,
+    )
 
     expected_pnl_improved: bool | None
     if current_metrics.expected_pnl is None or candidate_metrics.expected_pnl is None:
@@ -486,9 +534,9 @@ def compare_candidate_trade(
         expected_pnl_improved = candidate_metrics.expected_pnl >= current_metrics.expected_pnl
 
     return ScenarioComparison(
-        grid=grid,
+        grid=current_surface.grid,
         current_surface=current_surface,
-        candidate_surface=candidate_surface,
+        candidate_surface=combined_surface,
         current_metrics=current_metrics,
         candidate_metrics=candidate_metrics,
         flatness_improved=(
@@ -501,7 +549,57 @@ def compare_candidate_trade(
             candidate_metrics.terminal_negative_cells
             <= current_metrics.terminal_negative_cells
         ),
+        downside_improved=(
+            candidate_metrics.terminal_downside
+            <= current_metrics.terminal_downside
+        ),
+        delta_improved=(
+            candidate_metrics.terminal_max_abs_delta
+            <= current_metrics.terminal_max_abs_delta
+        ),
         expected_pnl_improved=expected_pnl_improved,
+    )
+
+
+def compare_candidate_trade(
+    current_contracts: list[ScenarioContract] | tuple[ScenarioContract, ...],
+    candidate_contract: ScenarioContract,
+    params: BatesParams,
+    as_of: dt.datetime,
+    spot_price: float,
+    price_range_pct: float = 0.15,
+    price_step: float = 250.0,
+    time_step_hours: float = 4.0,
+    horizon_dt: dt.datetime | None = None,
+    probability_weights: np.ndarray | None = None,
+    probability_method: str | None = None,
+    lognormal_sigma: float | None = None,
+) -> ScenarioComparison:
+    combined_contracts = list(current_contracts) + [candidate_contract]
+    grid = build_scenario_grid(
+        as_of=as_of,
+        spot_price=spot_price,
+        contracts=combined_contracts,
+        price_range_pct=price_range_pct,
+        price_step=price_step,
+        time_step_hours=time_step_hours,
+        horizon_dt=horizon_dt,
+    )
+    if probability_weights is None:
+        probability_weights = probability_weights_for_grid(
+            params=params,
+            spot_price=spot_price,
+            grid=grid,
+            as_of=as_of,
+            probability_method=probability_method,
+            lognormal_sigma=lognormal_sigma,
+        )
+    current_surface = build_portfolio_surface(list(current_contracts), params=params, grid=grid)
+    candidate_addition_surface = build_portfolio_surface([candidate_contract], params=params, grid=grid)
+    return compare_surface_addition(
+        current_surface=current_surface,
+        candidate_addition_surface=candidate_addition_surface,
+        probability_weights=probability_weights,
     )
 
 
@@ -533,12 +631,27 @@ def decide_candidate_trade(
         reasons.append(
             f"max loss {metrics.max_loss:.4f} below floor {limits.min_max_loss:.4f}"
         )
+    if limits.max_terminal_downside is not None and metrics.terminal_downside > limits.max_terminal_downside:
+        reasons.append(
+            f"terminal downside {metrics.terminal_downside:.4f} exceeds limit {limits.max_terminal_downside:.4f}"
+        )
+    if limits.max_terminal_abs_delta is not None and metrics.terminal_max_abs_delta > limits.max_terminal_abs_delta:
+        reasons.append(
+            f"terminal abs delta {metrics.terminal_max_abs_delta:.6f} exceeds limit {limits.max_terminal_abs_delta:.6f}"
+        )
     if limits.require_flatness_improvement and not comparison.flatness_improved:
         reasons.append("candidate trade does not improve surface flatness")
     if limits.require_variance_improvement and not comparison.variance_improved:
         reasons.append("candidate trade does not improve payoff variance")
     if limits.require_hole_reduction and not comparison.hole_reduced:
         reasons.append("candidate trade does not reduce terminal hole count")
+    if limits.require_downside_improvement and not comparison.downside_improved:
+        reasons.append("candidate trade does not improve terminal downside")
+    if limits.require_delta_improvement and not comparison.delta_improved:
+        reasons.append("candidate trade does not improve terminal delta")
+    if limits.require_expected_pnl_improvement:
+        if comparison.expected_pnl_improved is not True:
+            reasons.append("candidate trade does not improve expected pnl")
 
     return ScenarioDecision(accepted=not reasons, reasons=tuple(reasons))
 

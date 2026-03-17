@@ -33,6 +33,11 @@ import bates_pricer as bp
 import pandas as pd
 from calibration.params import BatesParams
 from strategy.config import StrategyConfig
+from strategy.scenario_risk import (
+    ScenarioEvaluationCache,
+    evaluate_candidate_quantity,
+    scenario_risk_is_active,
+)
 from strategy.signal import generate_signal
 from strategy.sizing import flat_size, kelly_size, max_loss_per_contract
 
@@ -93,6 +98,8 @@ class BacktestSummary:
     win_rate: float
     start_capital: float
     ending_equity: float
+    scenario_rejections: int
+    scenario_resized_trades: int
 
 
 @dataclass
@@ -349,6 +356,7 @@ def run_backtest(
 ) -> tuple[pd.DataFrame, BacktestSummary]:
     params_path = resolve_params_path(os.path.join(PROJECT_ROOT, cfg.params_path))
     params = BatesParams.load(params_path)
+    params_cache: dict[str, BatesParams] = {params_path: params}
     params_history_dir = os.path.join(PROJECT_ROOT, cfg.params_history_dir)
     params_history = load_historical_params(params_history_dir)
 
@@ -395,6 +403,10 @@ def run_backtest(
     executed_rows: list[dict] = []
     open_positions: list[dict] = []
     realized_pnl = 0.0
+    scenario_rejections = 0
+    scenario_resized_trades = 0
+    scenario_risk_enabled = scenario_risk_is_active(cfg)
+    scenario_evaluation_cache = ScenarioEvaluationCache()
 
     for candidate in candidates:
         open_positions, matured_pnl = settle_matured_positions(
@@ -414,6 +426,30 @@ def run_backtest(
         qty = min(qty, max_by_available_risk)
         if qty < 1:
             continue
+        requested_qty = qty
+        scenario_params = params_cache.get(candidate.params_path)
+        if scenario_params is None:
+            scenario_params = BatesParams.load(candidate.params_path)
+            params_cache[candidate.params_path] = scenario_params
+
+        scenario_gate = evaluate_candidate_quantity(
+            cfg=cfg,
+            current_positions=[position["scenario_position"] for position in open_positions],
+            candidate_position=candidate,
+            initial_quantity=qty,
+            params=scenario_params,
+            as_of=dt.datetime.fromtimestamp(candidate.entry_ts_ms / 1000, tz=dt.timezone.utc),
+            spot_price=candidate.spot_at_entry,
+            cache=scenario_evaluation_cache,
+            params_identifier=candidate.params_path,
+        )
+        if scenario_gate.approved_quantity < 1:
+            if scenario_risk_enabled:
+                scenario_rejections += 1
+            continue
+        if scenario_gate.approved_quantity < qty:
+            scenario_resized_trades += 1
+        qty = scenario_gate.approved_quantity
 
         pnl_per_contract = settlement_pnl_per_contract(
             candidate.side,
@@ -446,6 +482,49 @@ def run_backtest(
             "total_pnl": round(total_pnl, 6),
             "sizing_mode": cfg.sizing_mode,
             "params_path": candidate.params_path,
+            "scenario_qty_requested": int(requested_qty),
+            "scenario_qty_approved": int(qty),
+            "scenario_terminal_flatness": (
+                round(scenario_gate.comparison.candidate_metrics.surface_flatness_terminal, 6)
+                if scenario_gate.comparison is not None
+                else None
+            ),
+            "scenario_terminal_negative_cells": (
+                int(scenario_gate.comparison.candidate_metrics.terminal_negative_cells)
+                if scenario_gate.comparison is not None
+                else None
+            ),
+            "scenario_terminal_downside": (
+                round(scenario_gate.comparison.candidate_metrics.terminal_downside, 6)
+                if scenario_gate.comparison is not None
+                else None
+            ),
+            "scenario_terminal_abs_delta": (
+                round(scenario_gate.comparison.candidate_metrics.terminal_max_abs_delta, 6)
+                if scenario_gate.comparison is not None
+                else None
+            ),
+            "scenario_payoff_variance": (
+                round(scenario_gate.comparison.candidate_metrics.payoff_variance, 6)
+                if scenario_gate.comparison is not None
+                else None
+            ),
+            "scenario_expected_pnl": (
+                round(scenario_gate.comparison.candidate_metrics.expected_pnl, 6)
+                if scenario_gate.comparison is not None
+                and scenario_gate.comparison.candidate_metrics.expected_pnl is not None
+                else None
+            ),
+            "scenario_max_loss": (
+                round(scenario_gate.comparison.candidate_metrics.max_loss, 6)
+                if scenario_gate.comparison is not None
+                else None
+            ),
+            "scenario_reasons": (
+                "|".join(scenario_gate.decision.reasons)
+                if scenario_gate.decision is not None
+                else ""
+            ),
         }
         executed_rows.append(row)
         open_positions.append(
@@ -453,6 +532,23 @@ def run_backtest(
                 "expiry_ts_ms": candidate.expiry_ts_ms,
                 "required_risk": required_risk,
                 "total_pnl": total_pnl,
+                "scenario_position": CandidateTrade(
+                    instrument=candidate.instrument,
+                    event_ticker=candidate.event_ticker,
+                    entry_ts_ms=candidate.entry_ts_ms,
+                    expiry_ts_ms=candidate.expiry_ts_ms,
+                    side=candidate.side,
+                    quantity=qty,
+                    entry_price=candidate.entry_price,
+                    model_price=candidate.model_price,
+                    edge=candidate.edge,
+                    strike=candidate.strike,
+                    spot_at_entry=candidate.spot_at_entry,
+                    settlement_outcome=candidate.settlement_outcome,
+                    required_risk=required_risk,
+                    bar_volume=candidate.bar_volume,
+                    params_path=candidate.params_path,
+                ),
             }
         )
 
@@ -482,6 +578,8 @@ def run_backtest(
         win_rate=(wins / trade_count) if trade_count else 0.0,
         start_capital=cfg.total_capital_usd,
         ending_equity=cfg.total_capital_usd + gross_pnl,
+        scenario_rejections=scenario_rejections,
+        scenario_resized_trades=scenario_resized_trades,
     )
     return trades, summary
 
@@ -499,6 +597,8 @@ def print_summary(summary: BacktestSummary, output_path: str) -> None:
     print(f"  avg edge at entry:        {summary.avg_edge:.4f}")
     print(f"  start capital:            ${summary.start_capital:.2f}")
     print(f"  ending equity:            ${summary.ending_equity:.2f}")
+    print(f"  scenario rejections:      {summary.scenario_rejections}")
+    print(f"  scenario resized trades:  {summary.scenario_resized_trades}")
     print(f"  trade log:                {output_path}")
 
 

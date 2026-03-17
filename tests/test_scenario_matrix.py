@@ -14,6 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "pricer"))
 
 import bates_pricer as bp
 from calibration.params import BatesParams
+from strategy.config import StrategyConfig
 from strategy.scenario_matrix import (
     ScenarioContract,
     ScenarioGrid,
@@ -26,6 +27,11 @@ from strategy.scenario_matrix import (
     compute_surface_metrics,
     decide_candidate_trade,
     lognormal_price_probabilities,
+)
+from strategy.scenario_risk import (
+    ScenarioEvaluationCache,
+    evaluate_candidate_quantity,
+    quantity_schedule,
 )
 
 
@@ -119,6 +125,8 @@ class ScenarioMatrixTests(unittest.TestCase):
         self.assertEqual(metrics.hole_ranges[0].start_price, 97500.0)
         self.assertEqual(metrics.hole_ranges[0].end_price, 100000.0)
         self.assertAlmostEqual(metrics.max_loss, -0.4)
+        self.assertAlmostEqual(metrics.terminal_downside, 0.5)
+        self.assertGreater(metrics.terminal_max_abs_delta, 0.0)
 
     def test_candidate_comparison_and_decision(self) -> None:
         as_of = dt.datetime(2026, 3, 14, 12, 0, tzinfo=dt.timezone.utc)
@@ -173,6 +181,98 @@ class ScenarioMatrixTests(unittest.TestCase):
             ),
         )
         self.assertTrue(decision.accepted)
+        self.assertFalse(comparison.expected_pnl_improved)
+
+        ev_decision = decide_candidate_trade(
+            comparison,
+            ScenarioRiskLimits(require_expected_pnl_improvement=True),
+        )
+        self.assertFalse(ev_decision.accepted)
+        self.assertIn("candidate trade does not improve expected pnl", ev_decision.reasons)
+
+    def test_candidate_quantity_is_reduced_to_fit_scenario_limits(self) -> None:
+        as_of = dt.datetime(2026, 3, 14, 12, 0, tzinfo=dt.timezone.utc)
+        cfg = StrategyConfig(
+            enable_scenario_risk=True,
+            scenario_reduce_size_to_fit=True,
+            scenario_use_bates_probabilities=False,
+            scenario_price_range_pct=0.10,
+            scenario_price_step=10000.0,
+            scenario_time_step_hours=4.0,
+            scenario_max_terminal_downside=0.7,
+        )
+
+        candidate = type(
+            "Candidate",
+            (),
+            {
+                "instrument": "GEMI-BTC2603141100-HI100000",
+                "side": "buy",
+                "quantity": 2,
+                "entry_price": 0.6,
+                "event_ticker": "BTC2603141100",
+            },
+        )()
+
+        gate = evaluate_candidate_quantity(
+            cfg=cfg,
+            current_positions=[],
+            candidate_position=candidate,
+            initial_quantity=2,
+            params=self.params,
+            as_of=as_of,
+            spot_price=100000.0,
+        )
+
+        self.assertEqual(gate.approved_quantity, 1)
+        self.assertIsNotNone(gate.comparison)
+        self.assertTrue(gate.decision.accepted)
+        self.assertAlmostEqual(gate.comparison.candidate_metrics.terminal_downside, 0.6)
+
+    def test_quantity_schedule_checks_fifths_of_original_size(self) -> None:
+        self.assertEqual(quantity_schedule(100, True), (100, 80, 60, 40, 20))
+        self.assertEqual(quantity_schedule(9, True), (9, 7, 5, 3, 1))
+        self.assertEqual(quantity_schedule(100, False), (100,))
+
+    def test_reduced_sizes_are_only_checked_after_initial_denial(self) -> None:
+        as_of = dt.datetime(2026, 3, 14, 12, 0, tzinfo=dt.timezone.utc)
+        cfg = StrategyConfig(
+            enable_scenario_risk=True,
+            scenario_reduce_size_to_fit=True,
+            scenario_use_bates_probabilities=False,
+            scenario_price_range_pct=0.10,
+            scenario_price_step=10000.0,
+            scenario_time_step_hours=4.0,
+            scenario_max_terminal_downside=2.0,
+        )
+        cache = ScenarioEvaluationCache()
+
+        candidate = type(
+            "Candidate",
+            (),
+            {
+                "instrument": "GEMI-BTC2603141100-HI100000",
+                "side": "buy",
+                "quantity": 100,
+                "entry_price": 0.01,
+                "event_ticker": "BTC2603141100",
+            },
+        )()
+
+        gate = evaluate_candidate_quantity(
+            cfg=cfg,
+            current_positions=[],
+            candidate_position=candidate,
+            initial_quantity=100,
+            params=self.params,
+            as_of=as_of,
+            spot_price=100000.0,
+            cache=cache,
+            params_identifier="test-params",
+        )
+
+        self.assertEqual(gate.approved_quantity, 100)
+        self.assertEqual(len(cache.candidate_surfaces), 1)
 
     def test_lognormal_probabilities_fallback_when_grid_misses_mass(self) -> None:
         probabilities = lognormal_price_probabilities(

@@ -40,6 +40,25 @@ class StrategyConfig:
     max_open_positions: int = 5     # max simultaneously held positions
     one_per_instrument: bool = True # no doubling into the same instrument
     max_position_pct: float = 0.20  # max fraction of total capital in one position (Kelly)
+    enable_scenario_risk: bool = False
+    scenario_reduce_size_to_fit: bool = True
+    scenario_use_bates_probabilities: bool = True
+    scenario_price_range_pct: float = 0.15
+    scenario_price_step: float = 250.0
+    scenario_time_step_hours: float = 4.0
+    scenario_max_surface_flatness: float | None = None
+    scenario_max_terminal_negative_cells: int | None = None
+    scenario_max_payoff_variance: float | None = None
+    scenario_min_expected_pnl: float | None = None
+    scenario_min_max_loss: float | None = None
+    scenario_max_terminal_downside: float | None = None
+    scenario_max_terminal_abs_delta: float | None = None
+    scenario_require_flatness_improvement: bool = False
+    scenario_require_variance_improvement: bool = False
+    scenario_require_hole_reduction: bool = False
+    scenario_require_downside_improvement: bool = False
+    scenario_require_delta_improvement: bool = False
+    scenario_require_expected_pnl_improvement: bool = False
 
     # ── Calibration (live runner) ─────────────────────────────────────────────
     params_path: str = "data/deribit/bates_params_implied.json"

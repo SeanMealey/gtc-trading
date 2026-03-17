@@ -18,6 +18,7 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(SRC_DIR, "pricer"))
@@ -27,6 +28,11 @@ import bates_pricer as bp
 from calibration.params import BatesParams
 from strategy.config import StrategyConfig
 from strategy.position_log import Position, PositionLog
+from strategy.scenario_risk import (
+    ScenarioEvaluationCache,
+    evaluate_candidate_quantity,
+    scenario_risk_is_active,
+)
 from strategy.signal import generate_signal
 from strategy.sizing import flat_size, kelly_size, max_loss_per_contract
 
@@ -293,6 +299,7 @@ def run_paper(cfg: StrategyConfig, trade_log_path: str = DEFAULT_TRADE_LOG, once
     position_log = PositionLog(os.path.join(PROJECT_ROOT, cfg.positions_path))
     params, params_path = load_params(cfg)
     trade_log_abs = os.path.join(PROJECT_ROOT, trade_log_path)
+    scenario_risk_enabled = scenario_risk_is_active(cfg)
     print(f"Loaded params from {params_path}")
 
     while True:
@@ -307,6 +314,7 @@ def run_paper(cfg: StrategyConfig, trade_log_path: str = DEFAULT_TRADE_LOG, once
             open_positions = position_log.open_positions()
             open_instruments = {position.instrument for position in open_positions}
             capital_remaining = cfg.total_capital_usd - position_log.total_exposure_usd()
+            scenario_evaluation_cache = ScenarioEvaluationCache()
 
             print(
                 f"[{now.strftime('%Y-%m-%d %H:%M:%S UTC')}] "
@@ -362,6 +370,32 @@ def run_paper(cfg: StrategyConfig, trade_log_path: str = DEFAULT_TRADE_LOG, once
                         )
                         if qty < 1:
                             continue
+                        requested_qty = qty
+
+                        scenario_gate = evaluate_candidate_quantity(
+                            cfg=cfg,
+                            current_positions=open_positions,
+                            candidate_position=SimpleNamespace(
+                                instrument=symbol,
+                                side=signal.side,
+                                entry_price=signal.entry_price,
+                                event_ticker=event_ticker,
+                            ),
+                            initial_quantity=qty,
+                            params=params,
+                            as_of=now,
+                            spot_price=spot,
+                            cache=scenario_evaluation_cache,
+                            params_identifier=params_path,
+                        )
+                        if scenario_gate.approved_quantity < 1:
+                            if scenario_risk_enabled and scenario_gate.decision is not None:
+                                print(
+                                    f"  SKIP RISK {symbol} side={signal.side} "
+                                    f"reasons={' | '.join(scenario_gate.decision.reasons)}"
+                                )
+                            continue
+                        qty = scenario_gate.approved_quantity
 
                         position = Position(
                             instrument=symbol,
@@ -385,12 +419,24 @@ def run_paper(cfg: StrategyConfig, trade_log_path: str = DEFAULT_TRADE_LOG, once
                             params_path=params_path,
                         )
                         position_log.add(position)
+                        open_positions.append(position)
                         capital_remaining -= qty * max_loss_per_contract(signal.entry_price, signal.side)
                         open_instruments.add(symbol)
+                        if qty < requested_qty:
+                            print(
+                                f"  RISK RESIZE {symbol} qty={requested_qty}->{qty} "
+                                f"downside={scenario_gate.comparison.candidate_metrics.terminal_downside:.3f} "
+                                f"delta={scenario_gate.comparison.candidate_metrics.terminal_max_abs_delta:.4f}"
+                            )
+                        flatness_str = (
+                            f" flatness={scenario_gate.comparison.candidate_metrics.surface_flatness_terminal:.2f}"
+                            if scenario_gate.comparison is not None
+                            else ""
+                        )
                         print(
                             f"  PAPER FILL {signal.side.upper()} {symbol} qty={qty} "
                             f"entry={signal.entry_price:.3f} model={signal.model_price:.3f} "
-                            f"edge={signal.edge:.3f}"
+                            f"edge={signal.edge:.3f}{flatness_str}"
                         )
                     except Exception as exc:
                         print(f"  SKIP CONTRACT {symbol or '?'} error={exc}")
