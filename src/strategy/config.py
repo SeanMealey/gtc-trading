@@ -41,6 +41,7 @@ class StrategyConfig:
     one_per_instrument: bool = True # no doubling into the same instrument
     max_position_pct: float = 0.20  # max fraction of total capital in one position (Kelly)
     enable_scenario_risk: bool = False
+    scenario_min_positions: int = 0
     scenario_reduce_size_to_fit: bool = True
     scenario_use_bates_probabilities: bool = True
     scenario_price_range_pct: float = 0.15

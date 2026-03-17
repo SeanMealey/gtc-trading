@@ -166,6 +166,12 @@ def evaluate_candidate_quantity(
             comparison=None,
             decision=None,
         )
+    if len(list(current_positions)) < cfg.scenario_min_positions:
+        return ScenarioGateResult(
+            approved_quantity=initial_quantity,
+            comparison=None,
+            decision=None,
+        )
 
     if cache is None:
         cache = ScenarioEvaluationCache()
