@@ -6,3 +6,6 @@ pgrep -af "src/strategy/paper_runner.py"
 
 # kill paper trader
 pkill -f "src/strategy/paper_runner.py"
+
+# ssh
+ssh -i "GTC-Low-Frequency.pem" ubuntu@ec2-13-222-173-252.compute-1.amazonaws.com
