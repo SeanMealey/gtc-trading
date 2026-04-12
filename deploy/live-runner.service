@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/home/ubuntu/gtc-trading
+WorkingDirectory=/home/ubuntu/gtc-trading/src
 EnvironmentFile=/etc/gtc-trading/live.env
 ExecStart=/home/ubuntu/gtc-trading/.venv/bin/python -m strategy.runner --config /home/ubuntu/gtc-trading/config/live.json
 Restart=on-failure
@@ -18,7 +18,6 @@ StandardError=append:/home/ubuntu/gtc-trading/logs/live_runner.stderr.log
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=full
-ProtectHome=true
 PrivateTmp=true
 
 [Install]
