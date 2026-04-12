@@ -470,7 +470,7 @@ class GeminiExecutionClient:
         self.dry_run = dry_run
 
         self._nonce_lock = threading.Lock()
-        self._last_nonce_ms = 0
+        self._last_nonce_s = 0
         self._fast_api = self._make_fast_api_client(authenticated=False)
         self._private_fast_api = self._make_fast_api_client(authenticated=True)
 
@@ -488,11 +488,11 @@ class GeminiExecutionClient:
 
     def _next_nonce(self) -> str:
         with self._nonce_lock:
-            now_ms = int(time.time() * 1000)
-            if now_ms <= self._last_nonce_ms:
-                now_ms = self._last_nonce_ms + 1
-            self._last_nonce_ms = now_ms
-            return str(now_ms)
+            now_s = int(time.time())
+            if now_s <= self._last_nonce_s:
+                now_s = self._last_nonce_s + 1
+            self._last_nonce_s = now_s
+            return str(now_s)
 
     def _sign(self, endpoint: str, payload: dict) -> dict:
         if not self.api_key or not self.api_secret:

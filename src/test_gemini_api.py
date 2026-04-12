@@ -47,13 +47,13 @@ def sign_request(endpoint: str, payload: dict) -> dict:
     Build headers for a Gemini private REST request.
 
     Auth scheme (HMAC-SHA384):
-      1. Add 'request' (path) and 'nonce' (ms timestamp) to payload dict.
+      1. Add 'request' (path) and 'nonce' (seconds timestamp) to payload dict.
       2. JSON-encode, then base64-encode → X-GEMINI-PAYLOAD.
       3. HMAC-SHA384(base64_payload, key=api_secret).hexdigest() → X-GEMINI-SIGNATURE.
       4. X-GEMINI-APIKEY is the plain API key string.
     """
     payload["request"] = endpoint
-    payload["nonce"]   = str(int(time.time() * 1000))
+    payload["nonce"]   = str(int(time.time()))
 
     encoded      = json.dumps(payload).encode()
     b64_payload  = base64.b64encode(encoded).decode()
