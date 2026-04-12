@@ -58,10 +58,12 @@ The runner now refreshes the Deribit BTC options chain and re-runs implied Bates
    sudo install -m 644 deploy/live-runner.service /etc/systemd/system/
    sudo systemctl daemon-reload
    ```
-   The unit intentionally runs from `/home/ubuntu/gtc-trading/src` because the
-   live runner module is `src/strategy/runner.py`. Do not set
-   `ProtectHome=true` while the repo and virtualenv live under `/home/ubuntu`,
-   or systemd will fail to execute the venv Python binary with `status=203/EXEC`.
+   The unit keeps `/home/ubuntu/gtc-trading` as its working directory so the
+   relative paths inside `config/live.json` resolve under the repo root, and it
+   launches `/home/ubuntu/gtc-trading/src/strategy/runner.py` directly so the
+   `strategy` package is still importable. Do not set `ProtectHome=true` while
+   the repo and virtualenv live under `/home/ubuntu`, or systemd will fail to
+   execute the venv Python binary with `status=203/EXEC`.
 
 ## Rollout sequence
 
@@ -100,8 +102,8 @@ Expected: `[OK]` lines for positions, active orders, and order history. If any f
 `config/live.json` ships with `submit_orders=false` and `dry_run=true`. Run a single tick:
 
 ```
-cd /home/ubuntu/gtc-trading/src
-sudo -u ubuntu ../.venv/bin/python -m strategy.runner --config ../config/live.json --once
+cd /home/ubuntu/gtc-trading
+sudo -u ubuntu .venv/bin/python src/strategy/runner.py --config config/live.json --once
 ```
 
 Expected: a heartbeat line and `DRY ...` lines showing what *would* have been submitted, plus rows in `data/strategy/trades.live.csv` with `status=dry`. The runner must reach the end of the tick without raising — if it does, fix the cause before enabling submission.
