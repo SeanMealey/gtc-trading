@@ -40,6 +40,7 @@ class StrategyConfig:
     one_per_instrument: bool = True # no doubling into the same instrument
     max_position_pct: float = 0.20  # max fraction of total capital in one position (Kelly)
     enable_scenario_risk: bool = False
+    scenario_use_capital_scaled_defaults: bool = False
     scenario_min_positions: int = 0
     scenario_reduce_size_to_fit: bool = True
     scenario_use_bates_probabilities: bool = True
@@ -80,7 +81,7 @@ class StrategyConfig:
     # ── Calibration ───────────────────────────────────────────────────────────
     params_path: str = "data/deribit/bates_params_implied.json"
     params_history_dir: str = "data/deribit/params_history"
-    calibration_interval_hours: float = 24.0  # recalibrate every N hours; pauses entries
+    calibration_interval_hours: float = 24.0  # fetch Deribit chain + recalibrate every N hours; 0 disables
 
     # ── State & Logging ───────────────────────────────────────────────────────
     positions_path: str = "data/strategy/positions.json"
@@ -92,10 +93,12 @@ class StrategyConfig:
 
     # ── Live Execution & Safety ───────────────────────────────────────────────
     gemini_base_url: str = "https://api.gemini.com"
+    gemini_fast_api_url: str | None = None
+    gemini_fast_api_spot_symbol: str = "btcusd"
     request_timeout_seconds: float = 10.0
     submit_orders: bool = False              # gate live order submission
     dry_run: bool = True                     # if True, use ExecutionClient(dry_run=True)
-    time_in_force: str = "immediate-or-cancel"
+    time_in_force: str = "GTC"
 
     max_notional_per_order_usd: float = 25.0
     max_total_notional_usd: float = 200.0
@@ -112,6 +115,72 @@ class StrategyConfig:
     reconciliation_max_quantity_drift: int = 0  # exact match by default
 
     log_heartbeat_every_n_loops: int = 12
+
+    # ── Capital-Scaled Scenario Defaults ─────────────────────────────────────
+    # When scenario_use_capital_scaled_defaults is True and a scenario_*
+    # limit is None, these methods return a default proportional to
+    # total_capital_usd.  Explicit non-None values always override.
+    # When the flag is False (the default), None stays None — backward
+    # compatible with tests that set only selected limits.
+
+    def _capital_default_active(self) -> bool:
+        return self.enable_scenario_risk and self.scenario_use_capital_scaled_defaults
+
+    def effective_scenario_max_surface_flatness(self) -> float | None:
+        if self.scenario_max_surface_flatness is not None:
+            return self.scenario_max_surface_flatness
+        if not self._capital_default_active():
+            return None
+        # 5% of capital — allows some variance but flags lopsided books
+        return 0.05 * self.total_capital_usd
+
+    def effective_scenario_max_payoff_variance(self) -> float | None:
+        if self.scenario_max_payoff_variance is not None:
+            return self.scenario_max_payoff_variance
+        if not self._capital_default_active():
+            return None
+        # (8% of capital)^2 — variance units
+        return (0.08 * self.total_capital_usd) ** 2
+
+    def effective_scenario_min_expected_pnl(self) -> float | None:
+        if self.scenario_min_expected_pnl is not None:
+            return self.scenario_min_expected_pnl
+        if not self._capital_default_active():
+            return None
+        # portfolio should not have negative expected value
+        return -0.02 * self.total_capital_usd
+
+    def effective_scenario_min_max_loss(self) -> float | None:
+        if self.scenario_min_max_loss is not None:
+            return self.scenario_min_max_loss
+        if not self._capital_default_active():
+            return None
+        # worst-case loss capped at 10% of capital
+        return -0.10 * self.total_capital_usd
+
+    def effective_scenario_max_terminal_downside(self) -> float | None:
+        if self.scenario_max_terminal_downside is not None:
+            return self.scenario_max_terminal_downside
+        if not self._capital_default_active():
+            return None
+        # sum of negative terminal cells capped at 20% of capital
+        return 0.20 * self.total_capital_usd
+
+    def effective_scenario_max_terminal_abs_delta(self) -> float | None:
+        if self.scenario_max_terminal_abs_delta is not None:
+            return self.scenario_max_terminal_abs_delta
+        if not self._capital_default_active():
+            return None
+        # P&L slope per price step — 0.02% of capital per $250 price move
+        return 0.0002 * self.total_capital_usd
+
+    def effective_scenario_max_terminal_pin_risk(self) -> float | None:
+        if self.scenario_max_terminal_pin_risk is not None:
+            return self.scenario_max_terminal_pin_risk
+        if not self._capital_default_active():
+            return None
+        # max P&L swing near a strike capped at 8% of capital
+        return 0.08 * self.total_capital_usd
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -81,15 +81,16 @@ class ScenarioEvaluationCache:
 
 
 def scenario_limits_from_config(cfg: StrategyConfig) -> ScenarioRiskLimits:
+    """Build limits using capital-scaled defaults for any unset (None) value."""
     return ScenarioRiskLimits(
-        max_surface_flatness=cfg.scenario_max_surface_flatness,
+        max_surface_flatness=cfg.effective_scenario_max_surface_flatness(),
         max_terminal_negative_cells=cfg.scenario_max_terminal_negative_cells,
-        max_payoff_variance=cfg.scenario_max_payoff_variance,
-        min_expected_pnl=cfg.scenario_min_expected_pnl,
-        min_max_loss=cfg.scenario_min_max_loss,
-        max_terminal_downside=cfg.scenario_max_terminal_downside,
-        max_terminal_abs_delta=cfg.scenario_max_terminal_abs_delta,
-        max_terminal_pin_risk=cfg.scenario_max_terminal_pin_risk,
+        max_payoff_variance=cfg.effective_scenario_max_payoff_variance(),
+        min_expected_pnl=cfg.effective_scenario_min_expected_pnl(),
+        min_max_loss=cfg.effective_scenario_min_max_loss(),
+        max_terminal_downside=cfg.effective_scenario_max_terminal_downside(),
+        max_terminal_abs_delta=cfg.effective_scenario_max_terminal_abs_delta(),
+        max_terminal_pin_risk=cfg.effective_scenario_max_terminal_pin_risk(),
         require_flatness_improvement=cfg.scenario_require_flatness_improvement,
         require_variance_improvement=cfg.scenario_require_variance_improvement,
         require_hole_reduction=cfg.scenario_require_hole_reduction,

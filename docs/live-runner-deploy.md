@@ -2,6 +2,8 @@
 
 The live market maker runs as a single long-lived Python process on a Linux host. This document is the runbook for setting it up from scratch and rolling it out safely.
 
+The runner now refreshes the Deribit BTC options chain and re-runs implied Bates calibration on its own cadence while it is live. That cadence is controlled by `calibration_interval_hours` in `config/live.json`.
+
 ## Layout on the host
 
 ```
@@ -40,6 +42,7 @@ The live market maker runs as a single long-lived Python process on a Linux host
    python3 -m venv .venv
    .venv/bin/pip install -r deploy/requirements-live.txt
    ```
+   This environment now includes `pandas`, `scipy`, and `websockets` because live auto-calibration runs in-process and the spot feed uses Gemini Fast API over websocket.
 
 5. **Provision Gemini credentials**
    ```
@@ -62,7 +65,23 @@ The live market maker runs as a single long-lived Python process on a Linux host
 
 Do these in order. Do not skip ahead.
 
-### 1. Auth probe (no orders)
+### 1. Fast API connectivity probe
+
+`config/live.json` now points at the provisioned Fast API endpoint. Validate websocket connectivity from the EC2 instance:
+
+```
+cd /opt/gtc-trading
+sudo -u trader .venv/bin/python src/test_gemini_fast_api.py
+```
+
+Expected: one JSON message from the `btcusd@bookTicker` stream. This mirrors:
+
+```
+echo '{"id":"1","method":"subscribe","params":["btcusd@bookTicker"]}' | \
+  websocat -n 'ws://2e4e907b.fast.gemini.com'
+```
+
+### 2. Auth probe (no orders)
 
 ```
 cd /opt/gtc-trading
@@ -74,7 +93,7 @@ sudo -u trader \
 
 Expected: `[OK]` lines for positions, active orders, and order history. If any fail, fix credentials / permissions before continuing.
 
-### 2. Dry-run smoke test
+### 3. Dry-run smoke test
 
 `config/live.json` ships with `submit_orders=false` and `dry_run=true`. Run a single tick:
 
@@ -84,7 +103,9 @@ sudo -u trader .venv/bin/python -m strategy.runner --config config/live.json --o
 
 Expected: a heartbeat line and `DRY ...` lines showing what *would* have been submitted, plus rows in `data/strategy/trades.live.csv` with `status=dry`. The runner must reach the end of the tick without raising — if it does, fix the cause before enabling submission.
 
-### 3. Reconciliation gate
+With auto-calibration enabled, you should also see log lines showing the Deribit snapshot refresh and parameter update whenever the refresh cadence is due.
+
+### 4. Reconciliation gate
 
 Edit `config/live.json` and confirm `require_state_reconciliation: true`. Restart the dry run. The preflight log line should read:
 
@@ -94,7 +115,7 @@ reconciliation OK: 0 local positions, 0 remote positions, 0 active orders
 
 If you have manual positions on the account, either close them, copy them into `positions.live.json`, or set `reconciliation_max_quantity_drift` to the exact gap and re-run.
 
-### 4. Enable order submission for one tiny order
+### 5. Enable order submission for one tiny order
 
 Edit `config/live.json`:
 
@@ -113,9 +134,9 @@ sudo systemctl start live-runner
 journalctl -u live-runner -f
 ```
 
-Watch for one `FILL ...` line (or `NO_FILL` for IOC orders that did not cross). Verify on the Gemini UI that the position appears.
+Watch for one order submission and verify on the Gemini UI that the position or resting order appears. With the Fast API websocket path documented in `gemini-prediction-markets-llms.md`, the live config now uses `time_in_force: "GTC"` for prediction-market order entry.
 
-### 5. Widen limits
+### 6. Widen limits
 
 Once you have at least one confirmed live fill, ratchet `max_notional_per_order_usd`, `max_total_notional_usd`, and `daily_filled_notional_cap_usd` upward in small increments. Restart the service after each edit.
 
@@ -129,6 +150,7 @@ sudo systemctl restart live-runner
 * **Stop / start**: `sudo systemctl stop live-runner` / `sudo systemctl start live-runner`.
 * **Logs**: `journalctl -u live-runner -f` or `tail -f logs/live_runner.log`.
 * **Trade ledger**: `data/strategy/trades.live.csv` — every order attempt, fill, error, and decision context.
+* **Calibration cadence**: set `calibration_interval_hours` in `config/live.json`. For every 10 minutes, use `0.1666667`.
 
 ## Circuit breakers (automatic halt conditions)
 
@@ -146,6 +168,6 @@ If the runner exits and restarts mid-day, the preflight reconciles `positions.li
 
 ## Known residual risks
 
-* Exact Gemini PM order payload shape (`outcome`, `options`, `client_order_id` casing) should be re-verified against current Gemini docs before going wide. The first live order is the validation step.
-* Partial-fill / fee fields on IOC orders should be cross-checked between `place_order` echo and `get_order_status`. The runner re-fetches status to handle this.
+* Prediction-market order entry now uses Gemini Fast API websocket methods (`order.place`, `order.cancel`) and authenticated `orders@account` events. Snapshot-style account reads such as positions, active orders, and order history still use the documented REST endpoints because the downloaded PM Fast API doc did not provide websocket snapshot methods for those resources.
+* Partial-fill / fee fields should still be cross-checked against live Gemini behaviour on the first tiny order. The runner records the order-placement response plus any cached `orders@account` event seen immediately after placement.
 * Settlement / outcome polling is *not* yet automated — open positions remain `open` until you close or settle them manually. Add a settlement poller before running over expiries.

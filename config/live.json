@@ -21,6 +21,7 @@
   "max_position_pct": 0.10,
 
   "enable_scenario_risk": true,
+  "scenario_use_capital_scaled_defaults": true,
   "scenario_min_positions": 1,
   "scenario_reduce_size_to_fit": true,
   "scenario_use_bates_probabilities": true,
@@ -31,7 +32,7 @@
   "scenario_max_terminal_negative_cells": null,
   "scenario_max_payoff_variance": null,
   "scenario_min_expected_pnl": null,
-  "scenario_min_max_loss": -25.0,
+  "scenario_min_max_loss": null,
   "scenario_max_terminal_downside": null,
   "scenario_max_terminal_abs_delta": null,
   "scenario_max_terminal_pin_risk": null,
@@ -59,7 +60,7 @@
 
   "params_path": "data/deribit/bates_params_implied.json",
   "params_history_dir": "data/deribit/params_history",
-  "calibration_interval_hours": 24.0,
+  "calibration_interval_hours": 0.1666667,
 
   "positions_path": "data/strategy/positions.live.json",
   "trades_log_path": "data/strategy/trades.live.csv",
@@ -68,10 +69,12 @@
   "poll_interval_seconds": 5.0,
 
   "gemini_base_url": "https://api.gemini.com",
+  "gemini_fast_api_url": "ws://2e4e907b.fast.gemini.com",
+  "gemini_fast_api_spot_symbol": "btcusd",
   "request_timeout_seconds": 10.0,
   "submit_orders": false,
   "dry_run": true,
-  "time_in_force": "immediate-or-cancel",
+  "time_in_force": "GTC",
 
   "max_notional_per_order_usd": 10.0,
   "max_total_notional_usd": 100.0,

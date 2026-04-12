@@ -15,12 +15,12 @@ The runner is intentionally a single, linear loop:
             - run inventory-skew + scenario gates
             - size with sizing module
             - apply live-only safety caps
-            - submit IOC order via ExecutionClient
+            - submit Fast API order via ExecutionClient
             - record actual fill in trade ledger and position log
        d. emit a heartbeat line every N loops
 
-The runner never assumes a fill: every order is followed by a status read so
-local state matches what Gemini reports.
+The runner records the order state returned by Gemini and any cached
+`orders@account` websocket event observed during placement.
 
 Run with `python -m strategy.runner --config config/live.json` from `src/`.
 """
@@ -180,6 +180,23 @@ def _make_client_order_id() -> str:
     return f"mm-{uuid.uuid4().hex[:12]}"
 
 
+def _initial_calibration_due_at(
+    params: BatesParams,
+    interval_hours: float,
+    now: dt.datetime | None = None,
+) -> dt.datetime:
+    current_time = now or _now_utc()
+    if interval_hours <= 0:
+        return current_time + dt.timedelta(days=3650)
+
+    calibrated_at = _parse_iso(params.calibrated_at or "")
+    if calibrated_at is None:
+        return current_time
+    if calibrated_at.tzinfo is None:
+        calibrated_at = calibrated_at.replace(tzinfo=dt.timezone.utc)
+    return calibrated_at + dt.timedelta(hours=interval_hours)
+
+
 # ── runner ─────────────────────────────────────────────────────────────────
 
 
@@ -202,6 +219,10 @@ class LiveRunner:
         self.risk = RiskState()
         self.stats = RunnerStats()
         self._stop = False
+        self._next_calibration_due_at = _initial_calibration_due_at(
+            params,
+            self.cfg.calibration_interval_hours,
+        )
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -211,6 +232,7 @@ class LiveRunner:
 
     def run(self, *, max_loops: int | None = None) -> None:
         self._install_signal_handlers()
+        self._maybe_refresh_deribit_and_params()
         self._preflight()
 
         loop_count = 0
@@ -246,8 +268,9 @@ class LiveRunner:
 
     def _preflight(self) -> None:
         self.logger.info(
-            "preflight: base=%s submit_orders=%s dry_run=%s params_source=%s @ %s",
+            "preflight: base=%s fast_api=%s submit_orders=%s dry_run=%s params_source=%s @ %s",
             self.cfg.gemini_base_url,
+            self.cfg.gemini_fast_api_url or "disabled",
             self.cfg.submit_orders,
             self.cfg.dry_run,
             self.params.calibration_source,
@@ -390,6 +413,8 @@ class LiveRunner:
         if not self._check_circuit():
             return
 
+        self._maybe_refresh_deribit_and_params(now=now)
+
         try:
             events = self.client.get_active_events()
             spot = self.client.get_spot()
@@ -457,6 +482,49 @@ class LiveRunner:
             self.stats.orders_filled,
             self.risk.daily_filled_notional_usd,
             "open" if self.risk.circuit_open else "ok",
+        )
+
+    def _maybe_refresh_deribit_and_params(
+        self,
+        *,
+        now: dt.datetime | None = None,
+        force: bool = False,
+    ) -> None:
+        interval_hours = float(self.cfg.calibration_interval_hours)
+        if interval_hours <= 0:
+            return
+
+        current_time = now or _now_utc()
+        if not force and current_time < self._next_calibration_due_at:
+            return
+
+        interval = dt.timedelta(hours=interval_hours)
+        self._next_calibration_due_at = current_time + interval
+
+        self.logger.info(
+            "refreshing Deribit chain + implied params (interval=%.4fh)",
+            interval_hours,
+        )
+        started = time.perf_counter()
+        try:
+            new_params = _refresh_deribit_and_calibrate(self.cfg, self.logger)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(
+                "Deribit refresh/calibration failed; keeping prior params: %s\n%s",
+                exc,
+                traceback.format_exc(),
+            )
+            return
+
+        self.params = new_params
+        age = _params_age_hours(self.params, _now_utc())
+        age_str = "unknown" if age is None else f"{age:.2f}h"
+        self.logger.info(
+            "updated live params from %s @ %s in %.1fs (age=%s)",
+            self.params.calibration_source,
+            self.params.calibrated_at,
+            time.perf_counter() - started,
+            age_str,
         )
 
     # ── contract collection ────────────────────────────────────────────────
@@ -857,22 +925,6 @@ class LiveRunner:
 
         self.stats.orders_submitted += 1
 
-        # Re-fetch order status to confirm fill behaviour rather than trusting the new-order echo.
-        if order.order_id:
-            try:
-                latest_raw = self.client.get_order_status(order.order_id)
-                order = GeminiExecutionClient.normalise_order(
-                    latest_raw,
-                    requested_quantity=quantity,
-                    requested_price=sig.entry_price,
-                    client_order_id=client_order_id,
-                    instrument=view.instrument,
-                    side=sig.side,
-                    outcome=_outcome_for_side(sig.side),
-                )
-            except ExecutionError as exc:
-                self.logger.warning("could not re-fetch %s status: %s", order.order_id, exc)
-
         self._handle_fill(
             order=order,
             view=view,
@@ -996,6 +1048,25 @@ def _load_params(path: str) -> BatesParams:
     return BatesParams.load(path)
 
 
+def _refresh_deribit_and_calibrate(
+    cfg: StrategyConfig,
+    logger: logging.Logger,
+) -> BatesParams:
+    from calibration.implied import calibrate
+    from data_collection.get_deribit_options import collect_and_save
+
+    latest_path, snapshot_path = collect_and_save()
+    logger.info(
+        "saved Deribit chain snapshot: latest=%s snapshot=%s",
+        latest_path,
+        snapshot_path,
+    )
+    return calibrate(
+        chain_path=latest_path,
+        output_path=cfg.params_path,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live Gemini BTC market-maker runner")
     parser.add_argument("--config", required=True, help="path to StrategyConfig JSON")
@@ -1024,11 +1095,30 @@ def main(argv: list[str] | None = None) -> int:
     logger = _setup_logging(cfg.runner_log_path)
     logger.info("loaded config from %s", args.config)
 
-    params = _load_params(cfg.params_path)
-    logger.info("loaded params: %s", params.calibration_source)
+    try:
+        params = _load_params(cfg.params_path)
+        logger.info("loaded params: %s", params.calibration_source)
+    except FileNotFoundError:
+        if cfg.calibration_interval_hours <= 0:
+            logger.error(
+                "params file missing at %s and auto-calibration is disabled",
+                cfg.params_path,
+            )
+            return 2
+        logger.warning(
+            "params file missing at %s; fetching Deribit chain and calibrating now",
+            cfg.params_path,
+        )
+        try:
+            params = _refresh_deribit_and_calibrate(cfg, logger)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("startup calibration failed: %s\n%s", exc, traceback.format_exc())
+            return 2
 
     client = GeminiExecutionClient(
         base_url=cfg.gemini_base_url,
+        fast_api_url=cfg.gemini_fast_api_url,
+        fast_api_spot_symbol=cfg.gemini_fast_api_spot_symbol,
         timeout=cfg.request_timeout_seconds,
         dry_run=cfg.dry_run and not cfg.submit_orders,
     )
@@ -1050,6 +1140,8 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         logger.error("startup aborted: %s", exc)
         return 2
+    finally:
+        client.close()
     return 0
 
 

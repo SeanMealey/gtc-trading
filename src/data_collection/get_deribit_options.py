@@ -126,7 +126,7 @@ def write_csv(rows: list[dict], path: str) -> None:
         writer.writerows(rows)
 
 
-def main() -> None:
+def collect_and_save() -> tuple[str, str]:
     now_ms = time.time() * 1000
     snapshot_ts = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
@@ -164,6 +164,11 @@ def main() -> None:
     write_csv(rows, latest_path)
     write_csv(rows, snapshot_path)
     print(f"\nSaved:\n  {latest_path}\n  {snapshot_path}")
+    return latest_path, snapshot_path
+
+
+def main() -> None:
+    collect_and_save()
 
 
 if __name__ == "__main__":
