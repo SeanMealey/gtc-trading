@@ -1,0 +1,6 @@
+2026-04-12 07:40:31,754 INFO loaded config from /home/ubuntu/gtc-trading/config/live.json
+2026-04-12 07:40:31,754 WARNING params file missing at data/deribit/bates_params_implied.json; fetching Deribit chain and calibrating now
+2026-04-12 07:40:33,497 INFO saved Deribit chain snapshot: latest=/home/ubuntu/gtc-trading/src/data_collection/../../data/deribit/btc_options_chain.csv snapshot=/home/ubuntu/gtc-trading/src/data_collection/../../data/deribit/btc_options_chain_20260412_074033.csv
+2026-04-12 07:41:59,993 INFO preflight: base=https://api.gemini.com fast_api=ws://2e4e907b.fast.gemini.com submit_orders=False dry_run=True params_source=implied @ 2026-04-12T07:40:33Z
+2026-04-12 07:41:59,993 INFO params age: 0.0h
+2026-04-12 07:41:59,993 ERROR startup aborted: reconciliation failed fetching exchange state: GEMINI_API_KEY / GEMINI_API_SECRET not set
