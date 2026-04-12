@@ -7,7 +7,7 @@ The runner now refreshes the Deribit BTC options chain and re-runs implied Bates
 ## Layout on the host
 
 ```
-/opt/gtc-trading/                    # checkout root
+/home/ubuntu/gtc-trading/            # checkout root
   src/
   config/live.json                   # live config (no paper-only fields)
   data/strategy/positions.live.json  # local position state
@@ -21,24 +21,22 @@ The runner now refreshes the Deribit BTC options chain and re-runs implied Bates
 
 ## One-time setup
 
-1. **Create user / dirs**
+1. **Create config dir**
    ```
-   sudo useradd -r -s /bin/false trader
-   sudo mkdir -p /opt/gtc-trading /etc/gtc-trading
-   sudo chown -R trader:trader /opt/gtc-trading
+   sudo mkdir -p /etc/gtc-trading
    ```
 
-2. **Clone the repo into `/opt/gtc-trading`** and copy `config/live.json` from this repo.
+2. **Clone the repo into `/home/ubuntu/gtc-trading`** and copy `config/live.json` from this repo.
 
 3. **Build the C++ pricer extension on the target host** — the macOS `.so` shipped in the repo will not load on Linux.
    ```
-   cd /opt/gtc-trading/src/pricer
+   cd /home/ubuntu/gtc-trading/src/pricer
    ./build.sh
    ```
 
 4. **Create the venv and install live deps**
    ```
-   cd /opt/gtc-trading
+   cd /home/ubuntu/gtc-trading
    python3 -m venv .venv
    .venv/bin/pip install -r deploy/requirements-live.txt
    ```
@@ -50,7 +48,7 @@ The runner now refreshes the Deribit BTC options chain and re-runs implied Bates
    GEMINI_API_KEY=account-xxxxxxxxxxxxxxxxxxxx
    GEMINI_API_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    EOF
-   sudo chown trader:trader /etc/gtc-trading/live.env
+   sudo chown ubuntu:ubuntu /etc/gtc-trading/live.env
    ```
    Required Gemini permissions: **Fund Management + Trading (NewOrder + CancelOrder)**.
    You also need to accept the Prediction Markets ToS in the Gemini UI before any private PM endpoint will return data.
@@ -84,8 +82,8 @@ echo '{"id":"1","method":"subscribe","params":["btcusd@bookTicker"]}' | \
 ### 2. Auth probe (no orders)
 
 ```
-cd /opt/gtc-trading
-sudo -u trader \
+cd /home/ubuntu/gtc-trading
+sudo -u ubuntu \
   GEMINI_API_KEY=$(grep ^GEMINI_API_KEY /etc/gtc-trading/live.env | cut -d= -f2) \
   GEMINI_API_SECRET=$(grep ^GEMINI_API_SECRET /etc/gtc-trading/live.env | cut -d= -f2) \
   .venv/bin/python src/test_gemini_api.py
@@ -98,7 +96,7 @@ Expected: `[OK]` lines for positions, active orders, and order history. If any f
 `config/live.json` ships with `submit_orders=false` and `dry_run=true`. Run a single tick:
 
 ```
-sudo -u trader .venv/bin/python -m strategy.runner --config config/live.json --once
+sudo -u ubuntu .venv/bin/python -m strategy.runner --config config/live.json --once
 ```
 
 Expected: a heartbeat line and `DRY ...` lines showing what *would* have been submitted, plus rows in `data/strategy/trades.live.csv` with `status=dry`. The runner must reach the end of the tick without raising — if it does, fix the cause before enabling submission.
@@ -146,7 +144,7 @@ sudo systemctl restart live-runner
 
 ## Operational controls
 
-* **Kill switch**: `sudo -u trader touch /opt/gtc-trading/logs/KILL_SWITCH`. Runner stops at the next tick. Remove the file and restart to resume.
+* **Kill switch**: `sudo -u ubuntu touch /home/ubuntu/gtc-trading/logs/KILL_SWITCH`. Runner stops at the next tick. Remove the file and restart to resume.
 * **Stop / start**: `sudo systemctl stop live-runner` / `sudo systemctl start live-runner`.
 * **Logs**: `journalctl -u live-runner -f` or `tail -f logs/live_runner.log`.
 * **Trade ledger**: `data/strategy/trades.live.csv` — every order attempt, fill, error, and decision context.
