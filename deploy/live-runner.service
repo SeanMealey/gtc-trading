@@ -9,7 +9,8 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/gtc-trading
 EnvironmentFile=/etc/gtc-trading/live.env
-ExecStart=/home/ubuntu/gtc-trading/.venv/bin/python /home/ubuntu/gtc-trading/src/strategy/runner.py --config /home/ubuntu/gtc-trading/config/live.json
+Environment=PYTHONPATH=/home/ubuntu/gtc-trading/src
+ExecStart=/home/ubuntu/gtc-trading/.venv/bin/python -m strategy.runner --config /home/ubuntu/gtc-trading/config/live.json
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:/home/ubuntu/gtc-trading/logs/live_runner.stdout.log

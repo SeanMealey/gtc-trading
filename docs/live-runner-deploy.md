@@ -60,10 +60,11 @@ The runner now refreshes the Deribit BTC options chain and re-runs implied Bates
    ```
    The unit keeps `/home/ubuntu/gtc-trading` as its working directory so the
    relative paths inside `config/live.json` resolve under the repo root, and it
-   launches `/home/ubuntu/gtc-trading/src/strategy/runner.py` directly so the
-   `strategy` package is still importable. Do not set `ProtectHome=true` while
-   the repo and virtualenv live under `/home/ubuntu`, or systemd will fail to
-   execute the venv Python binary with `status=203/EXEC`.
+   sets `PYTHONPATH=/home/ubuntu/gtc-trading/src` before launching
+   `python -m strategy.runner`. That avoids import issues from running
+   `runner.py` as a bare script. Do not set `ProtectHome=true` while the repo
+   and virtualenv live under `/home/ubuntu`, or systemd will fail to execute
+   the venv Python binary with `status=203/EXEC`.
 
 ## Rollout sequence
 
@@ -103,7 +104,8 @@ Expected: `[OK]` lines for positions, active orders, and order history. If any f
 
 ```
 cd /home/ubuntu/gtc-trading
-sudo -u ubuntu .venv/bin/python src/strategy/runner.py --config config/live.json --once
+sudo -u ubuntu env PYTHONPATH=/home/ubuntu/gtc-trading/src \
+  .venv/bin/python -m strategy.runner --config config/live.json --once
 ```
 
 Expected: a heartbeat line and `DRY ...` lines showing what *would* have been submitted, plus rows in `data/strategy/trades.live.csv` with `status=dry`. The runner must reach the end of the tick without raising — if it does, fix the cause before enabling submission.
