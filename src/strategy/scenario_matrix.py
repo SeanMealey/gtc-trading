@@ -55,6 +55,7 @@ class ScenarioGrid:
 class ScenarioSurface:
     grid: ScenarioGrid
     pnl: np.ndarray
+    contract_strikes: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ class ScenarioMetrics:
     delta: np.ndarray
     terminal_max_abs_delta: float
     delta_abs_mean: float
+    terminal_pin_risk: float
     theta: np.ndarray
 
 
@@ -97,6 +99,7 @@ class ScenarioComparison:
     hole_reduced: bool
     downside_improved: bool
     delta_improved: bool
+    pin_risk_improved: bool
     expected_pnl_improved: bool | None
 
 
@@ -109,11 +112,13 @@ class ScenarioRiskLimits:
     min_max_loss: float | None = None
     max_terminal_downside: float | None = None
     max_terminal_abs_delta: float | None = None
+    max_terminal_pin_risk: float | None = None
     require_flatness_improvement: bool = False
     require_variance_improvement: bool = False
     require_hole_reduction: bool = False
     require_downside_improvement: bool = False
     require_delta_improvement: bool = False
+    require_pin_risk_improvement: bool = False
     require_expected_pnl_improvement: bool = False
 
 
@@ -255,7 +260,7 @@ def build_portfolio_surface(
 ) -> ScenarioSurface:
     surface = np.zeros((len(grid.evaluation_times), len(grid.prices)), dtype=float)
     if not contracts:
-        return ScenarioSurface(grid=grid, pnl=surface)
+        return ScenarioSurface(grid=grid, pnl=surface, contract_strikes=())
 
     bp = _load_pricer()
     pricer_params = params.to_pricer_params()
@@ -287,7 +292,11 @@ def build_portfolio_surface(
                 surface[time_idx] += (contract.entry_price - contract_values) * contract.quantity
             else:
                 raise ValueError(f"unsupported side: {contract.side!r}")
-    return ScenarioSurface(grid=grid, pnl=surface)
+    return ScenarioSurface(
+        grid=grid,
+        pnl=surface,
+        contract_strikes=tuple(float(contract.strike) for contract in contracts),
+    )
 
 
 def _central_difference(values: np.ndarray, coordinates: np.ndarray, axis: int) -> np.ndarray:
@@ -337,10 +346,37 @@ def detect_hole_ranges(pnl_row: np.ndarray, prices: np.ndarray) -> tuple[HoleRan
     return tuple(holes)
 
 
+def compute_terminal_pin_risk(
+    pnl_row: np.ndarray,
+    prices: np.ndarray,
+    strikes: tuple[float, ...] | list[float],
+    window_steps: int = 1,
+) -> float:
+    if len(prices) == 0 or len(strikes) == 0:
+        return 0.0
+
+    if window_steps < 0:
+        raise ValueError("window_steps must be non-negative")
+
+    pin_risk = 0.0
+    unique_strikes = sorted({float(strike) for strike in strikes})
+    for strike in unique_strikes:
+        nearest_idx = int(np.argmin(np.abs(prices - strike)))
+        left_idx = max(0, nearest_idx - window_steps)
+        right_idx = min(len(prices) - 1, nearest_idx + window_steps)
+        local_pnl = pnl_row[left_idx : right_idx + 1]
+        if len(local_pnl) == 0:
+            continue
+        local_range = float(np.max(local_pnl) - np.min(local_pnl))
+        pin_risk = max(pin_risk, local_range)
+    return pin_risk
+
+
 def compute_surface_metrics(
     surface: ScenarioSurface,
     probability_weights: np.ndarray | None = None,
     target_time_index: int = -1,
+    pin_risk_window_steps: int = 1,
 ) -> ScenarioMetrics:
     pnl = surface.pnl
     grid = surface.grid
@@ -362,6 +398,12 @@ def compute_surface_metrics(
     holes = detect_hole_ranges(target_row, grid.prices)
     downside = np.clip(-target_row, 0.0, None)
     terminal_delta = np.abs(delta[target_time_index])
+    terminal_pin_risk = compute_terminal_pin_risk(
+        pnl_row=target_row,
+        prices=grid.prices,
+        strikes=surface.contract_strikes,
+        window_steps=pin_risk_window_steps,
+    )
 
     return ScenarioMetrics(
         flatness_by_time=row_stds,
@@ -379,6 +421,7 @@ def compute_surface_metrics(
         delta=delta,
         terminal_max_abs_delta=float(terminal_delta.max()) if len(terminal_delta) else 0.0,
         delta_abs_mean=float(np.abs(delta).mean()),
+        terminal_pin_risk=terminal_pin_risk,
         theta=theta,
     )
 
@@ -510,6 +553,7 @@ def compare_surface_addition(
     current_surface: ScenarioSurface,
     candidate_addition_surface: ScenarioSurface,
     probability_weights: np.ndarray | None = None,
+    pin_risk_window_steps: int = 1,
 ) -> ScenarioComparison:
     if current_surface.grid != candidate_addition_surface.grid:
         raise ValueError("surface grids must match")
@@ -517,14 +561,17 @@ def compare_surface_addition(
     current_metrics = compute_surface_metrics(
         current_surface,
         probability_weights=probability_weights,
+        pin_risk_window_steps=pin_risk_window_steps,
     )
     combined_surface = ScenarioSurface(
         grid=current_surface.grid,
         pnl=current_surface.pnl + candidate_addition_surface.pnl,
+        contract_strikes=current_surface.contract_strikes + candidate_addition_surface.contract_strikes,
     )
     candidate_metrics = compute_surface_metrics(
         combined_surface,
         probability_weights=probability_weights,
+        pin_risk_window_steps=pin_risk_window_steps,
     )
 
     expected_pnl_improved: bool | None
@@ -557,6 +604,10 @@ def compare_surface_addition(
             candidate_metrics.terminal_max_abs_delta
             <= current_metrics.terminal_max_abs_delta
         ),
+        pin_risk_improved=(
+            candidate_metrics.terminal_pin_risk
+            <= current_metrics.terminal_pin_risk
+        ),
         expected_pnl_improved=expected_pnl_improved,
     )
 
@@ -574,6 +625,7 @@ def compare_candidate_trade(
     probability_weights: np.ndarray | None = None,
     probability_method: str | None = None,
     lognormal_sigma: float | None = None,
+    pin_risk_window_steps: int = 1,
 ) -> ScenarioComparison:
     combined_contracts = list(current_contracts) + [candidate_contract]
     grid = build_scenario_grid(
@@ -600,6 +652,7 @@ def compare_candidate_trade(
         current_surface=current_surface,
         candidate_addition_surface=candidate_addition_surface,
         probability_weights=probability_weights,
+        pin_risk_window_steps=pin_risk_window_steps,
     )
 
 
@@ -639,6 +692,10 @@ def decide_candidate_trade(
         reasons.append(
             f"terminal abs delta {metrics.terminal_max_abs_delta:.6f} exceeds limit {limits.max_terminal_abs_delta:.6f}"
         )
+    if limits.max_terminal_pin_risk is not None and metrics.terminal_pin_risk > limits.max_terminal_pin_risk:
+        reasons.append(
+            f"terminal pin risk {metrics.terminal_pin_risk:.4f} exceeds limit {limits.max_terminal_pin_risk:.4f}"
+        )
     if limits.require_flatness_improvement and not comparison.flatness_improved:
         reasons.append("candidate trade does not improve surface flatness")
     if limits.require_variance_improvement and not comparison.variance_improved:
@@ -649,6 +706,8 @@ def decide_candidate_trade(
         reasons.append("candidate trade does not improve terminal downside")
     if limits.require_delta_improvement and not comparison.delta_improved:
         reasons.append("candidate trade does not improve terminal delta")
+    if limits.require_pin_risk_improvement and not comparison.pin_risk_improved:
+        reasons.append("candidate trade does not improve terminal pin risk")
     if limits.require_expected_pnl_improvement:
         if comparison.expected_pnl_improved is not True:
             reasons.append("candidate trade does not improve expected pnl")
@@ -709,5 +768,6 @@ def summarize_metrics(metrics: ScenarioMetrics) -> str:
         f"expected_pnl={expected} "
         f"variance={metrics.payoff_variance:.4f} "
         f"terminal_negative_cells={metrics.terminal_negative_cells} "
+        f"pin_risk={metrics.terminal_pin_risk:.4f} "
         f"holes={holes}"
     )

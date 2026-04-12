@@ -27,8 +27,7 @@ class StrategyConfig:
 
     # ── Liquidity Gate ────────────────────────────────────────────────────────
     require_two_sided: bool = True  # require both bid AND ask to be present
-    min_total_shares: int = 5       # minimum totalShares on the contract (live)
-                                    # in backtest: minimum candle volume
+    min_total_shares: int = 5       # minimum totalShares on the contract
 
     # ── Sizing ────────────────────────────────────────────────────────────────
     sizing_mode: str = "flat"       # "flat" or "kelly"
@@ -54,14 +53,31 @@ class StrategyConfig:
     scenario_min_max_loss: float | None = None
     scenario_max_terminal_downside: float | None = None
     scenario_max_terminal_abs_delta: float | None = None
+    scenario_max_terminal_pin_risk: float | None = None
+    scenario_pin_risk_window_steps: int = 1
     scenario_require_flatness_improvement: bool = False
     scenario_require_variance_improvement: bool = False
     scenario_require_hole_reduction: bool = False
     scenario_require_downside_improvement: bool = False
     scenario_require_delta_improvement: bool = False
+    scenario_require_pin_risk_improvement: bool = False
     scenario_require_expected_pnl_improvement: bool = False
 
-    # ── Calibration (live runner) ─────────────────────────────────────────────
+    # ── Inventory Skew ────────────────────────────────────────────────────────
+    enable_inventory_skew: bool = False
+    inventory_skew_ev_weight: float = 1.0
+    inventory_skew_flatness_weight: float = 0.5
+    inventory_skew_max_loss_weight: float = 0.5
+    inventory_skew_downside_weight: float = 0.25
+    inventory_skew_delta_weight: float = 0.25
+    inventory_skew_pin_risk_weight: float = 0.5
+    inventory_skew_max_edge_credit: float = 0.02
+    inventory_skew_max_edge_penalty: float = 0.02
+    inventory_skew_require_positive_score: bool = False
+    inventory_skew_size_multiplier_min: float = 0.5
+    inventory_skew_size_multiplier_max: float = 1.25
+
+    # ── Calibration ───────────────────────────────────────────────────────────
     params_path: str = "data/deribit/bates_params_implied.json"
     params_history_dir: str = "data/deribit/params_history"
     calibration_interval_hours: float = 24.0  # recalibrate every N hours; pauses entries
@@ -69,17 +85,33 @@ class StrategyConfig:
     # ── State & Logging ───────────────────────────────────────────────────────
     positions_path: str = "data/strategy/positions.json"
     trades_log_path: str = "data/strategy/trades.csv"
-    paper_trades_path: str = "data/strategy/paper_trades.csv"
-    paper_fee_per_contract: float = 0.02
+    runner_log_path: str = "logs/live_runner.log"
 
-    # ── Loop (live runner) ────────────────────────────────────────────────────
+    # ── Loop ──────────────────────────────────────────────────────────────────
     poll_interval_seconds: float = 5.0
 
-    # ── Backtest ──────────────────────────────────────────────────────────────
-    backtest_spread_half: float = 0.03   # synthetic half-spread applied to candle close
-                                          # bid = close - spread_half, ask = close + spread_half
-    backtest_entry: str = "first"         # "first" = enter on first signal per instrument
-                                          # "best"  = enter on highest-edge candle (look-ahead, optimistic)
+    # ── Live Execution & Safety ───────────────────────────────────────────────
+    gemini_base_url: str = "https://api.gemini.com"
+    request_timeout_seconds: float = 10.0
+    submit_orders: bool = False              # gate live order submission
+    dry_run: bool = True                     # if True, use ExecutionClient(dry_run=True)
+    time_in_force: str = "immediate-or-cancel"
+
+    max_notional_per_order_usd: float = 25.0
+    max_total_notional_usd: float = 200.0
+    max_quantity_per_order: int = 50
+    max_open_positions_live: int = 10
+    max_consecutive_api_failures: int = 5
+    max_params_age_hours: float = 48.0
+    max_book_spread: float = 0.20            # reject contracts where ask - bid > this
+    daily_loss_limit_usd: float = 50.0
+    daily_filled_notional_cap_usd: float = 500.0
+    kill_switch_path: str = "logs/KILL_SWITCH"
+
+    require_state_reconciliation: bool = True
+    reconciliation_max_quantity_drift: int = 0  # exact match by default
+
+    log_heartbeat_every_n_loops: int = 12
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

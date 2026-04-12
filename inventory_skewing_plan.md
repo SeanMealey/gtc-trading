@@ -166,7 +166,7 @@ Where:
 - worse flatness lowers score
 - better max loss raises score
 
-This score should be used to rank candidates before execution, especially in the backtest and paper runner loops.
+This score should be used to rank candidates before execution in the live runner loop.
 
 ### Important Note
 
@@ -236,41 +236,23 @@ The current scenario pipeline already produces the needed metrics:
 The inventory skew module should consume a `ScenarioComparison` rather than rebuilding surfaces.
 
 
-### 3. Integrate Into Backtest
-
-Integration point:
-
-- after raw candidate generation and basic sizing
-- before final scenario-gate accept/reject
-
-Flow in backtest:
-
-1. compute scenario comparison for requested quantity
-2. compute inventory skew decision
-3. reject or deprioritize candidates that fail the inventory filter
-4. run surviving candidates through the final scenario gate
-
-For the backtest, it may be useful to rank multiple same-timestamp candidates by inventory-aware score.
-
-
-### 4. Integrate Into Paper Runner
+### 3. Integrate Into Live Runner
 
 Integration point:
 
 - after raw signal generation
-- before paper fill logging
+- before order submission and trade logging
 
-Flow in paper runner:
+Flow in the live runner:
 
 1. generate signal
 2. run inventory skew evaluation
 3. print why the candidate was helped or penalized
 4. then run the scenario hard gate
 
-
 ### 5. Add Config Knobs
 
-Add config settings to `StrategyConfig` and expose them in `config/paper.ec2.json`.
+Add config settings to `StrategyConfig` and expose them in the live runner config.
 
 Recommended first-pass config fields:
 
@@ -303,8 +285,7 @@ Add trade-entry metadata for:
 
 This should be added to:
 
-- backtest trade CSV
-- paper trade logs
+- live trade logs
 - optional dashboard columns later
 
 
@@ -359,8 +340,8 @@ Add unit tests for:
 
 Add integration tests for:
 
-- backtest candidate ranking changes when two trades have similar raw edge but different portfolio impact
-- paper runner logs the skew adjustment
+- live-runner candidate ranking changes when two trades have similar raw edge but different portfolio impact
+- the runner logs the skew adjustment
 
 
 ## Risks and How to Avoid Them
@@ -405,7 +386,7 @@ The best first version is:
    - `delta_flatness`
    - `delta_max_loss`
 3. Convert those into an `effective_required_edge`.
-4. Log the adjustment in backtest and paper trading.
+4. Log the adjustment in the live runner.
 5. Use the skewed edge threshold before the hard scenario gate.
 
 This keeps the implementation small, coherent, and aligned with the current architecture.

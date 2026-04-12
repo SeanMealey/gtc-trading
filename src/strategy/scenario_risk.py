@@ -89,11 +89,13 @@ def scenario_limits_from_config(cfg: StrategyConfig) -> ScenarioRiskLimits:
         min_max_loss=cfg.scenario_min_max_loss,
         max_terminal_downside=cfg.scenario_max_terminal_downside,
         max_terminal_abs_delta=cfg.scenario_max_terminal_abs_delta,
+        max_terminal_pin_risk=cfg.scenario_max_terminal_pin_risk,
         require_flatness_improvement=cfg.scenario_require_flatness_improvement,
         require_variance_improvement=cfg.scenario_require_variance_improvement,
         require_hole_reduction=cfg.scenario_require_hole_reduction,
         require_downside_improvement=cfg.scenario_require_downside_improvement,
         require_delta_improvement=cfg.scenario_require_delta_improvement,
+        require_pin_risk_improvement=cfg.scenario_require_pin_risk_improvement,
         require_expected_pnl_improvement=cfg.scenario_require_expected_pnl_improvement,
     )
 
@@ -113,6 +115,7 @@ def scenario_risk_is_active(cfg: StrategyConfig) -> bool:
             limits.min_max_loss,
             limits.max_terminal_downside,
             limits.max_terminal_abs_delta,
+            limits.max_terminal_pin_risk,
         )
     ) or any(
         (
@@ -121,6 +124,7 @@ def scenario_risk_is_active(cfg: StrategyConfig) -> bool:
             limits.require_hole_reduction,
             limits.require_downside_improvement,
             limits.require_delta_improvement,
+            limits.require_pin_risk_improvement,
             limits.require_expected_pnl_improvement,
         )
     )
@@ -247,6 +251,7 @@ def evaluate_candidate_quantity(
             current_surface=current_surface,
             candidate_addition_surface=candidate_addition_surface,
             probability_weights=probability_weights,
+            pin_risk_window_steps=cfg.scenario_pin_risk_window_steps,
         )
 
     last_comparison: ScenarioComparison | None = None

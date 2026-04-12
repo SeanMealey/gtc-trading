@@ -1,5 +1,5 @@
 """
-Persistence for paper-trading positions.
+Persistence for strategy positions.
 """
 
 from __future__ import annotations

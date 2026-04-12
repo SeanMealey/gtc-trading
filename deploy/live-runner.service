@@ -1,0 +1,25 @@
+[Unit]
+Description=Gemini BTC binary-option market maker (live)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/gtc-trading
+EnvironmentFile=/etc/gtc-trading/live.env
+ExecStart=/opt/gtc-trading/.venv/bin/python -m strategy.runner --config /opt/gtc-trading/config/live.json
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/opt/gtc-trading/logs/live_runner.stdout.log
+StandardError=append:/opt/gtc-trading/logs/live_runner.stderr.log
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

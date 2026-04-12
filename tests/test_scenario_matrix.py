@@ -116,9 +116,10 @@ class ScenarioMatrixTests(unittest.TestCase):
                     [0.1, -0.2, -0.3, 0.2, 0.4],
                 ]
             ),
+            contract_strikes=(100000.0,),
         )
 
-        metrics = compute_surface_metrics(surface)
+        metrics = compute_surface_metrics(surface, pin_risk_window_steps=1)
 
         self.assertEqual(metrics.terminal_negative_cells, 2)
         self.assertEqual(len(metrics.hole_ranges), 1)
@@ -127,6 +128,7 @@ class ScenarioMatrixTests(unittest.TestCase):
         self.assertAlmostEqual(metrics.max_loss, -0.4)
         self.assertAlmostEqual(metrics.terminal_downside, 0.5)
         self.assertGreater(metrics.terminal_max_abs_delta, 0.0)
+        self.assertAlmostEqual(metrics.terminal_pin_risk, 0.5)
 
     def test_candidate_comparison_and_decision(self) -> None:
         as_of = dt.datetime(2026, 3, 14, 12, 0, tzinfo=dt.timezone.utc)
@@ -166,11 +168,13 @@ class ScenarioMatrixTests(unittest.TestCase):
             time_step_hours=4.0,
             horizon_dt=horizon_dt,
             probability_weights=probabilities,
+            pin_risk_window_steps=1,
         )
 
         self.assertTrue(comparison.flatness_improved)
         self.assertTrue(comparison.variance_improved)
         self.assertTrue(comparison.max_loss_improved)
+        self.assertTrue(comparison.pin_risk_improved)
 
         decision = decide_candidate_trade(
             comparison,
@@ -189,6 +193,48 @@ class ScenarioMatrixTests(unittest.TestCase):
         )
         self.assertFalse(ev_decision.accepted)
         self.assertIn("candidate trade does not improve expected pnl", ev_decision.reasons)
+
+    def test_pin_risk_limit_rejects_trade_when_terminal_jump_is_too_large(self) -> None:
+        as_of = dt.datetime(2026, 3, 14, 12, 0, tzinfo=dt.timezone.utc)
+        current_surface = ScenarioSurface(
+            grid=ScenarioGrid(
+                prices=np.asarray([95000.0, 97500.0, 100000.0, 102500.0, 105000.0]),
+                evaluation_times=(as_of, as_of + dt.timedelta(hours=4)),
+            ),
+            pnl=np.asarray(
+                [
+                    [0.10, 0.10, 0.10, 0.10, 0.10],
+                    [0.10, 0.10, 0.10, 0.10, 0.10],
+                ],
+                dtype=float,
+            ),
+            contract_strikes=(),
+        )
+        candidate_addition_surface = ScenarioSurface(
+            grid=current_surface.grid,
+            pnl=np.asarray(
+                [
+                    [-0.10, -0.05, 0.20, 0.60, 0.80],
+                    [-0.60, -0.55, 0.10, 0.70, 0.90],
+                ],
+                dtype=float,
+            ),
+            contract_strikes=(100000.0,),
+        )
+        from strategy.scenario_matrix import compare_surface_addition
+
+        comparison = compare_surface_addition(
+            current_surface=current_surface,
+            candidate_addition_surface=candidate_addition_surface,
+            pin_risk_window_steps=1,
+        )
+        decision = decide_candidate_trade(
+            comparison,
+            ScenarioRiskLimits(max_terminal_pin_risk=1.0),
+        )
+
+        self.assertFalse(decision.accepted)
+        self.assertIn("terminal pin risk", decision.reasons[0])
 
     def test_candidate_quantity_is_reduced_to_fit_scenario_limits(self) -> None:
         as_of = dt.datetime(2026, 3, 14, 12, 0, tzinfo=dt.timezone.utc)

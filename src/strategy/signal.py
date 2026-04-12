@@ -1,7 +1,7 @@
 """
 Signal generation — pure function, no I/O, no API calls.
 
-The same logic is used by both the live runner and the backtest.
+The same logic is reused anywhere the strategy evaluates a live market quote.
 """
 
 from __future__ import annotations
