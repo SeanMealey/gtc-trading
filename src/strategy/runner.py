@@ -682,7 +682,7 @@ class LiveRunner:
                 )
                 comparison = None
 
-        if inventory_skew_is_active(cfg) and comparison is not None:
+        if inventory_skew_is_active(cfg) and comparison is not None and open_positions:
             base_required = (
                 cfg.effective_buy_min_edge() if sig.side == "buy" else cfg.effective_sell_min_edge()
             )
