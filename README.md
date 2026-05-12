@@ -1,10 +1,12 @@
 # GTC Trading Project Description
 
+![Alt Text](dashboard.png)
+
 ## What This Repository Is
 
 This repository is a research and live-trading system for Gemini BTC prediction markets. These markets are binary contracts, typically named like `GEMI-BTC2603062200-HI69000`, that pay $1 if BTC settles above the strike at expiry and $0 otherwise.
 
-The project combines market-data collection, derivatives calibration, fast model pricing, portfolio risk controls, and a live runner that can quote or trade Gemini prediction-market contracts. The main strategy uses a Bates stochastic-volatility-with-jumps model to estimate fair values for binary BTC contracts, then compares those fair values with Gemini bid/ask markets to decide whether to trade or quote.
+The project combines market-data collection, derivatives calibration, fast model pricing, portfolio risk controls, and a live runner that can quote or trade Gemini prediction-market contracts. The main strategy uses a Bates stochastic-volatility-with-jumps model to estimate fair values for binary BTC contracts, then compares thoP se fair values with Gemini bid/ask markets to decide whether to trade or quote.
 
 The repo is not just a notebook or backtest. It contains a deployable live runner, live configuration, systemd deployment notes, execution clients, persistent position and trade logs, unit tests, and operational safeguards such as reconciliation, circuit breakers, and a kill switch.
 
