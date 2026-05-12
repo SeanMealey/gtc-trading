@@ -1,444 +1,322 @@
-# Gemini Prediction Markets — WebSocket & Fast API
+# GTC Trading Project Description
 
-> llms.txt reference for building against Gemini's real-time prediction markets APIs.
-> Sources: docs.gemini.com (April 2026). Always check the official docs for the latest.
+## What This Repository Is
 
-## Overview
+This repository is a research and live-trading system for Gemini BTC prediction markets. These markets are binary contracts, typically named like `GEMI-BTC2603062200-HI69000`, that pay $1 if BTC settles above the strike at expiry and $0 otherwise.
 
-Gemini offers **both WebSocket and Fast API** access for prediction markets — not just REST. The recommended path for new integrations is **Fast API**, their next-generation low-latency WebSocket. The original WebSocket API (`wss://ws.gemini.com`) is also fully supported and is what the prediction markets getting-started guide uses directly.
+The project combines market-data collection, derivatives calibration, fast model pricing, portfolio risk controls, and a live runner that can quote or trade Gemini prediction-market contracts. The main strategy uses a Bates stochastic-volatility-with-jumps model to estimate fair values for binary BTC contracts, then compares those fair values with Gemini bid/ask markets to decide whether to trade or quote.
 
-| API | Endpoint | Latency | Use Case |
-|-----|----------|---------|----------|
-| REST | `https://api.gemini.com/v1/prediction-markets/...` | Standard | Browse markets, check positions |
-| WebSocket | `wss://ws.gemini.com` | Real-time | Stream prices, place/cancel orders, order events |
-| Fast API | `wss://wsapi.fast.gemini.com` | Sub-10ms (p99~5–15ms) | Same as WS but lower latency, unified trading + market data |
+The repo is not just a notebook or backtest. It contains a deployable live runner, live configuration, systemd deployment notes, execution clients, persistent position and trade logs, unit tests, and operational safeguards such as reconciliation, circuit breakers, and a kill switch.
 
-## How Prediction Markets Work
+## What It Does
 
-- **Events** are real-world questions (e.g. "2028 Presidential Election Winner").
-- Each event has **contracts** (possible outcomes you can trade).
-- Every contract has a **YES** and **NO** side. Price ≈ implied probability.
-- Payout is always **$1** for winners, **$0** for losers. Settlement is automatic.
-- Prices are between **$0.01–$0.99**. YES + NO ≈ $1.00 (spread accounts for difference).
+At a high level, the system:
 
-## Ticker Format
+1. Collects BTC spot, options, and prediction-market data.
+2. Calibrates a Bates model to Deribit BTC options implied volatility.
+3. Uses a C++ COS pricer to compute fair prices for Gemini binary BTC contracts.
+4. Scans active Gemini prediction markets.
+5. Filters contracts by liquidity, spread, expiry, model confidence, and risk limits.
+6. Generates trading signals or resting market-maker quotes.
+7. Sizes orders using flat or Kelly-style sizing.
+8. Applies scenario-matrix risk controls and inventory-aware skew.
+9. Sends orders to Gemini when live trading is enabled.
+10. Persists positions, order attempts, fills, and decision context for restart and auditability.
 
-Trading symbols use the `instrumentSymbol` field from the REST events endpoint.
+The system supports two related trading styles:
 
-Example: `GEMI-PRES2028-VANCE`, `GEMI-FEDJAN26-DN25`, `GEMI-BTC100K-YES`
+- **Liquidity-taking mode**: if the model price is above the ask by enough edge, buy; if the model price is below the bid by enough edge, sell.
+- **Market-making mode**: post resting bid and ask quotes around model value, adjusted for required edge, maker fees, time to expiry, inventory, and current book constraints.
 
-## Authentication (WebSocket)
+## Repository Layout
 
-Authentication headers **must** be sent during the initial WebSocket handshake. You **cannot** authenticate after connecting. Market data streams work without auth; trading and order events require it.
+### `src/pricer/`
 
-### Requirements
-- API key must be **account-scoped**
-- Must have **time-based nonce** enabled
-- Must have **Trading** permission (grants `NewOrder` and `CancelOrder`)
-- Accept Prediction Markets terms of service in the Gemini Exchange UI first
+This directory contains the Bates pricing engine:
 
-### Signature Algorithm
+- `bates.hpp` implements the Bates stochastic-volatility-with-jumps model.
+- `cos_pricer.hpp` implements COS-method pricing.
+- `mc_pricer.hpp` contains Monte Carlo pricing support.
+- `bindings.cpp` exposes the C++ pricer to Python through pybind11.
+- `build.sh` builds the local Python extension.
+- `bates_pricer.cpython-312-darwin.so` is a built macOS extension currently checked into the repo.
 
-```
-nonce = current_epoch_time_in_seconds (as string)
-payload = base64_encode(nonce)
-signature = hex(hmac_sha384(payload, api_secret))
-```
+Live pricing depends on this extension being built for the host platform. The deployment docs note that the extension must be rebuilt on Linux before running live.
 
-### Headers (set during WS handshake)
+### `src/calibration/`
 
-```
-X-GEMINI-APIKEY: <your-api-key>
-X-GEMINI-NONCE: <nonce>
-X-GEMINI-PAYLOAD: <payload>
-X-GEMINI-SIGNATURE: <signature>
-```
+Calibration code turns Deribit BTC options data into Bates parameters:
 
-### Node.js Example
+- `implied.py` fits Bates parameters to Deribit implied volatility data.
+- `implied_historical.py` and `build_params_history.py` support historical parameter analysis.
+- `params.py` defines the `BatesParams` structure and serialization helpers.
 
-```javascript
-const crypto = require("crypto");
-const WebSocket = require("ws");
+The current live config expects calibrated parameters at:
 
-const nonce = Math.floor(Date.now() / 1000).toString();
-const payload = Buffer.from(nonce).toString("base64");
-const signature = crypto
-  .createHmac("sha384", API_SECRET)
-  .update(payload)
-  .digest("hex");
-
-const ws = new WebSocket("wss://ws.gemini.com", {
-  headers: {
-    "X-GEMINI-APIKEY": API_KEY,
-    "X-GEMINI-NONCE": nonce,
-    "X-GEMINI-PAYLOAD": payload,
-    "X-GEMINI-SIGNATURE": signature,
-  },
-});
+```text
+data/deribit/bates_params_implied.json
 ```
 
-## Message Format (Fast API / WebSocket)
+The live runner can periodically refresh the Deribit option chain and recalibrate while running, controlled by `calibration_interval_hours` in `config/live.json`.
 
-### Request
+### `src/data_collection/`
 
-```json
-{
-  "id": "1",
-  "method": "METHOD_NAME",
-  "params": { ... }
-}
+This directory contains scripts for acquiring source data:
+
+- Gemini BTC prediction-market events, candles, trades, and settlements.
+- Gemini BTC spot data.
+- Binance supplemental BTC spot data.
+- Deribit options chains for calibration.
+
+Collected data is stored under `data/`, especially:
+
+- `data/gemini_prediction_markets/`
+- `data/gemini_spot/`
+- `data/deribit/`
+
+### `src/strategy/`
+
+This is the core trading system.
+
+Important modules include:
+
+- `config.py`: central `StrategyConfig` dataclass for signal thresholds, sizing, risk, execution, logging, calibration, and market-making settings.
+- `signal.py`: pure signal-generation logic for deciding when model value crosses the market by enough edge.
+- `sizing.py`: flat and Kelly-style order sizing.
+- `quoting.py`: pure market-maker quote-generation logic.
+- `quote_manager.py`: tracks resting market-maker quotes and decides when to replace or cancel them.
+- `inventory_skew.py`: adjusts trading or quoting behavior based on current inventory and scenario quality.
+- `scenario_matrix.py`: builds scenario P&L surfaces across BTC prices and future evaluation times.
+- `scenario_risk.py`: applies portfolio-level risk gates to candidate trades.
+- `execution.py`: Gemini execution and market-data client, including REST signing and Fast API websocket support.
+- `position_log.py`: persistent local position state.
+- `trade_ledger.py`: append-only ledger for order decisions, attempts, fills, and dry-run records.
+- `runner.py`: the live strategy loop that connects all of the above.
+
+### `src/live_dashboard.py`
+
+This is a terminal dashboard for monitoring active Gemini BTC prediction markets. It fetches active events, reads Bates parameters, prices contracts with the C++ pricer, and displays model prices versus market bid/ask using Rich.
+
+The dashboard is separate from the live strategy. It shares the pricer and calibration parameters, but it does not depend on the trading runner.
+
+### `config/live.json`
+
+This is the live runtime configuration. It controls:
+
+- edge thresholds and model filters
+- liquidity gates
+- sizing mode and capital assumptions
+- scenario risk and inventory skew
+- calibration cadence and parameter paths
+- position, trade, quote, and runner log paths
+- Gemini REST and Fast API connection settings
+- reference spot-price source
+- order-submission flags
+- live safety caps and circuit breakers
+- market-making behavior
+
+The checked-in `config/live.json` currently has `submit_orders: true`, `dry_run: false`, and `mm_enabled: true`, so it is configured for live market-making rather than paper-only use.
+
+### `docs/` and Planning Documents
+
+The repo includes several design and operational documents:
+
+- `docs/live-market-maker-outline.md`
+- `docs/live-runner-deploy.md`
+- `strategy_implementation_description.md`
+- `inventory_skewing_plan.md`
+- `scenario_matrix_live_integration_plan.md`
+- `scenario_matrix_further_optimizations.md`
+- `directional_exposure_solution.md`
+
+Some older docs describe work that was not implemented yet at the time they were written. The code now includes a live execution client, runner, ledger, deployment files, market-making logic, and broader risk controls.
+
+### `tests/`
+
+The test suite covers the strategy modules and live-runner behavior without requiring real Gemini network access. Tests use mocks for Gemini execution and, where needed, the C++ pricer.
+
+Covered areas include:
+
+- signal and quoting behavior
+- sizing and inventory skew
+- scenario matrix and risk checks
+- position logging and trade ledger behavior
+- execution client normalization
+- live runner decision flow
+- quote-manager behavior
+
+## How The System Works
+
+### 1. Data And Calibration
+
+The project starts with market data. Deribit BTC options data is collected and used to fit a Bates model. The calibration process fits model-implied volatility to market implied volatility, then writes the resulting parameters as JSON.
+
+Those parameters represent the current model view of BTC dynamics: spot, rates, variance, mean reversion, volatility of variance, correlation, and jump parameters.
+
+### 2. Contract Discovery
+
+The live runner asks Gemini for active BTC prediction-market events. Each event contains contracts with instrument symbols, bid/ask prices, sizes, expiry metadata, and `totalShares` liquidity information.
+
+Gemini BTC binary instruments encode their expiry and strike in the symbol. For example, `GEMI-BTC2603062200-HI69000` means a BTC high-style binary contract with a timestamp-like expiry code and a 69000 strike.
+
+### 3. Model Pricing
+
+For each eligible contract, the runner parses the strike and expiry, computes time to expiry, and calls the C++ Bates/COS pricer to estimate the fair binary price.
+
+The model output is a probability-like price between 0 and 1, matching the binary payout format.
+
+### 4. Signal Or Quote Generation
+
+In liquidity-taking mode, `signal.py` compares model price with the live bid/ask:
+
+- Buy when `model_price - ask` is large enough.
+- Sell when `bid - model_price` is large enough.
+- Skip when the edge is too small, the market is one-sided, the spread is too wide, the contract is illiquid, or expiry/model filters fail.
+
+In market-making mode, `quoting.py` computes resting quotes around model value:
+
+- required edge increases with model distance from 0.5
+- required edge includes expected maker fees
+- quote placement avoids crossing the book
+- quote sizes are bounded by config and inventory limits
+- quoting is disabled near expiry or outside configured model/time bands
+- existing inventory can force reduce-only quoting
+
+`quote_manager.py` then handles quote placement, replacement, stale quote cancellation, and reconciliation with exchange-side active orders.
+
+### 5. Sizing And Portfolio Risk
+
+Candidate orders are sized by either:
+
+- flat dollar allocation per trade
+- fractional Kelly sizing for binary options
+
+Before submission, the runner applies live caps such as max quantity, max notional per order, total notional, max open positions, daily filled-notional cap, and daily loss limit.
+
+When enabled, scenario risk builds a grid over BTC prices and future times. It values current positions plus the candidate trade across that grid, producing a P&L surface. Candidate trades can then be rejected or resized if they worsen configured metrics such as max loss, downside, flatness, variance, delta, pin risk, or expected P&L.
+
+Inventory skew adds another layer: it can reward trades that improve portfolio shape and penalize trades that worsen concentrated exposure.
+
+### 6. Execution
+
+`execution.py` provides the Gemini execution layer. It supports:
+
+- HMAC-SHA384 REST authentication for private endpoints
+- account/position/order snapshots through Gemini REST endpoints
+- public event and book access
+- Fast API websocket market-data subscriptions
+- Fast API websocket order placement and cancellation when configured
+- normalized `OrderResult` objects
+- dry-run behavior for testing decisions without submitting real orders
+
+The live runner never treats a visible quote as a guaranteed fill. It records Gemini order responses and uses actual reported fill quantity, average execution price, fees, and status.
+
+### 7. State, Logging, And Recovery
+
+The live runner persists local state to configured files:
+
+- positions: `data/strategy/positions.live.json`
+- trade ledger: `data/strategy/trades.live.csv`
+- runner log: `logs/live_runner.log`
+- dry quotes: `data/strategy/dry_quotes.live.csv`
+
+On startup, the runner can reconcile local positions against Gemini positions, active orders, and recent order history. If the state differs beyond configured tolerance, startup aborts rather than trading from a bad book.
+
+Operational controls include:
+
+- a file-based kill switch at `logs/KILL_SWITCH`
+- max consecutive API failure circuit breaker
+- daily loss limit
+- daily filled-notional cap
+- stale parameter checks
+- stale/missing market quote cleanup
+- heartbeat logging
+
+## How To Run It
+
+### Install Dependencies
+
+Live Python dependencies are listed in:
+
+```text
+deploy/requirements-live.txt
 ```
 
-### Success Response
+They include numpy, pandas, scipy, pybind11, rich, and websockets.
 
-```json
-{
-  "id": "1",
-  "status": 200,
-  "result": { ... }
-}
+### Build The Pricer
+
+Build the C++ pricer extension for the current machine:
+
+```bash
+cd src/pricer
+./build.sh
 ```
 
-### Error Response
+The checked-in `.so` is platform-specific, so a Linux deployment must rebuild it locally.
 
-```json
-{
-  "id": "1",
-  "status": 401,
-  "error": {
-    "code": -1002,
-    "msg": "Authentication required"
-  }
-}
+### Run Tests
+
+From the repo root:
+
+```bash
+python -m pytest
 ```
 
-## Methods
+The tests are designed to avoid real exchange calls by mocking Gemini clients and pricing where appropriate.
 
-### subscribe / unsubscribe
+### Run The Dashboard
 
-```json
-{
-  "id": "1",
-  "method": "subscribe",
-  "params": ["GEMI-PRES2028-VANCE@bookTicker"]
-}
+From the repo root:
+
+```bash
+python src/live_dashboard.py
 ```
 
-### order.place
+Optional arguments let you choose the parameter file or refresh interval.
 
-Place a prediction market limit order via WebSocket:
+### Run The Live Runner
 
-```json
-{
-  "id": "2",
-  "method": "order.place",
-  "params": {
-    "symbol": "GEMI-PRES2028-VANCE",
-    "side": "BUY",
-    "type": "LIMIT",
-    "timeInForce": "GTC",
-    "price": "0.27",
-    "quantity": "10",
-    "eventOutcome": "YES",
-    "clientOrderId": "my-order-id"
-  }
-}
+The deployment runbook is in `docs/live-runner-deploy.md`. A typical dry smoke test is:
+
+```bash
+PYTHONPATH=src python -m strategy.runner --config config/live.json --once
 ```
 
-| Param | Values | Notes |
-|-------|--------|-------|
-| `side` | `BUY`, `SELL` | |
-| `type` | `LIMIT` | Only limit orders currently supported |
-| `timeInForce` | `GTC` | Good Til Cancelled |
-| `price` | `"0.01"` – `"0.99"` | String, the contract price |
-| `quantity` | `> 0` | Number of contracts (string) |
-| `eventOutcome` | `YES`, `NO` | Which side of the contract |
-| `clientOrderId` | any string | Optional, for your tracking |
+Before running against a real account, verify Gemini credentials, Prediction Markets permissions, the Prediction Markets Terms of Service, the live config, and the current values of `submit_orders`, `dry_run`, and `mm_enabled`.
 
-### order.cancel
+## Key Safety Notes
 
-```json
-{
-  "id": "3",
-  "method": "order.cancel",
-  "params": { "orderId": "73797746498585286" }
-}
-```
+This repository can be configured to submit real Gemini orders. Treat `config/live.json` as a production control surface.
 
-### order.cancel_all / order.cancel_session
+Important live-trading gates include:
 
-Cancel all orders or just orders from the current session.
+- `submit_orders`
+- `dry_run`
+- `max_notional_per_order_usd`
+- `max_total_notional_usd`
+- `daily_filled_notional_cap_usd`
+- `daily_loss_limit_usd`
+- `kill_switch_path`
+- `require_state_reconciliation`
+- `mm_enabled`
 
-### Utility Methods
+Do not assume a local development run is paper trading. Check the config first.
 
-- `ping` — keepalive
-- `time` — server time
-- `conninfo` — connection info
-- `list_subscriptions` — list active subscriptions
-- `depth` — request L2 order book snapshot
+## Current Project State
 
-## Streams
+The repo currently contains:
 
-All streams use the pattern `{symbol}@streamName`. For prediction markets, `{symbol}` is the `instrumentSymbol` (e.g. `GEMI-PRES2028-VANCE`).
+- a Bates calibration and pricing stack
+- Gemini prediction-market data collectors
+- historical market data under `data/`
+- a Rich dashboard
+- a live runner
+- Gemini REST and Fast API execution support
+- live market-making quote logic
+- scenario and inventory risk controls
+- persistent position and ledger files
+- deployment docs and a systemd service unit
+- unit tests for the strategy layer
 
-### bookTicker (real-time best bid/ask)
-
-Subscribe: `GEMI-PRES2028-VANCE@bookTicker`
-
-```json
-{
-  "u": 1751505576085,
-  "E": 1751508438600117161,
-  "s": "GEMI-PRES2028-VANCE",
-  "b": "0.26",
-  "B": "5000",
-  "a": "0.28",
-  "A": "3200"
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `u` | Update ID |
-| `E` | Event time (nanoseconds) |
-| `s` | Symbol |
-| `b` | Best bid price |
-| `B` | Best bid quantity |
-| `a` | Best ask price |
-| `A` | Best ask quantity |
-
-### Depth Streams (L2 order book)
-
-| Stream | Frequency |
-|--------|-----------|
-| `{symbol}@depth5` | Top 5 levels, 1s |
-| `{symbol}@depth10` | Top 10 levels, 1s |
-| `{symbol}@depth20` | Top 20 levels, 1s |
-| `{symbol}@depth5@100ms` | Top 5 levels, 100ms |
-| `{symbol}@depth10@100ms` | Top 10 levels, 100ms |
-| `{symbol}@depth20@100ms` | Top 20 levels, 100ms |
-| `{symbol}@depth` | Differential, 1s |
-| `{symbol}@depth@100ms` | Differential, 100ms |
-
-Partial depth response:
-
-```json
-{
-  "lastUpdateId": 12345678,
-  "bids": [["0.26", "5000"], ["0.25", "3000"]],
-  "asks": [["0.28", "3200"], ["0.29", "1500"]]
-}
-```
-
-Differential depth response (quantity `"0"` = level removed):
-
-```json
-{
-  "e": "depthUpdate",
-  "E": 1751508260659505382,
-  "s": "GEMI-PRES2028-VANCE",
-  "U": 12345677,
-  "u": 12345678,
-  "b": [["0.26", "4800"]],
-  "a": [["0.28", "3200"]]
-}
-```
-
-### Trade Stream
-
-Subscribe: `{symbol}@trade`
-
-```json
-{
-  "E": 1759873803503023900,
-  "s": "GEMI-PRES2028-VANCE",
-  "t": 2840140956529623,
-  "p": "0.27",
-  "q": "100",
-  "m": true
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `t` | Trade ID |
-| `p` | Price |
-| `q` | Quantity |
-| `m` | Is buyer the maker |
-
-### orders@account (requires auth)
-
-Real-time order lifecycle events for your account.
-
-```json
-{
-  "E": 1759291847686856569,
-  "s": "GEMI-PRES2028-VANCE",
-  "i": 73797746498585286,
-  "c": "my-order-id",
-  "S": "BUY",
-  "o": "LIMIT",
-  "X": "NEW",
-  "p": "0.27",
-  "q": "10",
-  "z": "10",
-  "O": "YES",
-  "T": 1759291847686856569
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `i` | Order ID |
-| `c` | Client order ID |
-| `S` | Side: `BUY` / `SELL` |
-| `X` | Status: `NEW`, `OPEN`, `FILLED`, `PARTIALLY_FILLED`, `CANCELED`, `REJECTED`, `MODIFIED` |
-| `p` | Order price |
-| `q` | Original quantity |
-| `z` | Remaining quantity |
-| `Z` | Executed quantity (last fill for FILLED events; cumulative for CANCELED) |
-| `L` | Last execution price |
-| `O` | Event outcome: `YES` / `NO` |
-| `r` | Rejection/cancellation reason (when applicable) |
-
-### balances@account (requires auth)
-
-Real-time balance updates. Also available as `balances@account@1s` for periodic snapshots.
-
-```json
-{
-  "e": "balanceUpdate",
-  "E": 1768250434780,
-  "u": 1768250421600,
-  "B": [{ "a": "USD", "f": "207.39" }]
-}
-```
-
-## REST Endpoints (Prediction Markets)
-
-These are public (no auth) unless noted.
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/v1/prediction-markets/events` | No | List events (filter by `status`, `category`, `search`) |
-| GET | `/v1/prediction-markets/events/{ticker}` | No | Single event details |
-| GET | `/v1/prediction-markets/events/recently-settled` | No | Last 24h settled events |
-| GET | `/v1/prediction-markets/events/newly-listed` | No | Newly listed events |
-| GET | `/v1/prediction-markets/events/upcoming` | No | Upcoming events |
-| GET | `/v1/prediction-markets/categories` | No | Available categories |
-| POST | `/v1/prediction-markets/order` | Yes | Place limit order |
-| POST | `/v1/prediction-markets/order/cancel` | Yes | Cancel order |
-| POST | `/v1/prediction-markets/orders/active` | Yes | List open orders |
-| POST | `/v1/prediction-markets/orders/history` | Yes | Order history |
-| POST | `/v1/prediction-markets/positions` | Yes | Current positions |
-
-## Fast API Performance Tiers
-
-| Tier | Latency (p99) | Access |
-|------|---------------|--------|
-| Tier 2 (Public Internet) | ~15ms | Default, connect to `wss://wsapi.fast.gemini.com` |
-| Tier 1 (In-Region AWS us-east-1) | ~10ms | Requires onboarding |
-| Tier 0 (Local Zone, near NY5) | ~5ms | Requires onboarding |
-
-Contact your account manager for Tier 0/1 access.
-
-## Common Errors
-
-| Code | Message | Fix |
-|------|---------|-----|
-| `-2010` | Order rejected | Price must be $0.01–$0.99, qty > 0, outcome must be YES/NO. Market may be closed. |
-| `-1002` | Authentication required | Trading methods need auth headers at handshake time. |
-| `403` / `TERMS_NOT_ACCEPTED` | Terms not accepted | Accept Prediction Markets terms in the Gemini Exchange UI. |
-| `InsufficientFunds` | Insufficient funds | Need enough USD. 100 contracts at $0.27 = $27. |
-
-## Quick Reference: Full Working Example (Node.js)
-
-Stream prices + place an order + receive fill notifications:
-
-```javascript
-const crypto = require("crypto");
-const WebSocket = require("ws");
-
-const API_KEY = "your-api-key";
-const API_SECRET = "your-api-secret";
-const SYMBOL = "GEMI-PRES2028-VANCE";
-
-const nonce = Math.floor(Date.now() / 1000).toString();
-const payload = Buffer.from(nonce).toString("base64");
-const signature = crypto
-  .createHmac("sha384", API_SECRET)
-  .update(payload)
-  .digest("hex");
-
-const ws = new WebSocket("wss://ws.gemini.com", {
-  headers: {
-    "X-GEMINI-APIKEY": API_KEY,
-    "X-GEMINI-NONCE": nonce,
-    "X-GEMINI-PAYLOAD": payload,
-    "X-GEMINI-SIGNATURE": signature,
-  },
-});
-
-ws.on("open", () => {
-  ws.send(JSON.stringify({
-    id: "1",
-    method: "subscribe",
-    params: [
-      `${SYMBOL}@bookTicker`,
-      "orders@account",
-      "balances@account",
-    ],
-  }));
-});
-
-let orderPlaced = false;
-
-ws.on("message", (raw) => {
-  const data = JSON.parse(raw);
-
-  // Stream prices
-  if (data.b && data.a && data.s === SYMBOL) {
-    console.log(`${data.s}  bid: $${data.b}  ask: $${data.a}`);
-
-    // Place order on first price update
-    if (!orderPlaced) {
-      orderPlaced = true;
-      ws.send(JSON.stringify({
-        id: "2",
-        method: "order.place",
-        params: {
-          symbol: SYMBOL,
-          side: "BUY",
-          type: "LIMIT",
-          timeInForce: "GTC",
-          price: "0.27",
-          quantity: "10",
-          eventOutcome: "YES",
-          clientOrderId: `order-${Date.now()}`,
-        },
-      }));
-    }
-  }
-
-  // Order updates
-  if (data.X) {
-    console.log(`Order ${data.X}: ${data.S} ${data.O} @ $${data.p} x${data.q}`);
-  }
-
-  // Balance updates
-  if (data.e === "balanceUpdate") {
-    data.B.forEach((b) => console.log(`Balance: ${b.a} = ${b.f}`));
-  }
-});
-```
-
-## Links
-
-- Getting Started: https://docs.gemini.com/prediction-markets/getting-started
-- Fast API Intro: https://docs.gemini.com/websocket/fast-api/introduction
-- Fast API Streams: https://docs.gemini.com/websocket/fast-api/streams
-- Fast API Message Format: https://docs.gemini.com/websocket/fast-api/message-format
-- REST Markets API: https://docs.gemini.com/prediction-markets/markets
-- REST Trading API: https://docs.gemini.com/prediction-markets/trading
-- REST Positions API: https://docs.gemini.com/prediction-markets/positions
-- Changelog: https://docs.gemini.com/changelog/revision-history
+The main remaining operational risks are exchange-specific live behavior: partial fills, fee fields, account-event timing, settlement automation, and production monitoring/alerting. The code records detailed decision and order context, but live behavior should still be validated with very small limits before increasing size.
