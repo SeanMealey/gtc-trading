@@ -4,3 +4,8 @@ Miniconda3-latest-Linux-x86_64.sh
 *.so
 build.sh
 *.DS_Store
+.claude
+.DS_Store
+.editorconfig
+**/__pycache__/
+
